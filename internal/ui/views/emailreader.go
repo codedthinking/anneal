@@ -165,8 +165,30 @@ func (v *EmailReaderView) prepareContent() {
 		}
 	}
 
+	// Collapse multiple empty lines (more than 1) into single empty line
+	body = regexp.MustCompile(`\n{3,}`).ReplaceAllString(body, "\n\n")
+	body = strings.TrimSpace(body)
+
 	// Wrap text to content width
 	v.lines = v.wrapText(body, v.contentWidth-4)
+
+	// Remove consecutive empty lines from the result
+	v.lines = v.collapseEmptyLines(v.lines)
+}
+
+// collapseEmptyLines removes consecutive empty lines, keeping only one
+func (v *EmailReaderView) collapseEmptyLines(lines []string) []string {
+	var result []string
+	prevEmpty := false
+	for _, line := range lines {
+		isEmpty := strings.TrimSpace(line) == ""
+		if isEmpty && prevEmpty {
+			continue // Skip consecutive empty lines
+		}
+		result = append(result, line)
+		prevEmpty = isEmpty
+	}
+	return result
 }
 
 // looksLikeMarkdown checks if text appears to be markdown

@@ -257,10 +257,28 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 		a.emails = msg.emails
+		oldThreadCount := len(a.threads)
 		a.threads = a.groupEmailsIntoThreads(msg.emails)
-		a.selectedThread = 0
-		a.selectedInThread = 0
-		a.threadList = views.NewThreadListView(a.width-26, a.height-6)
+
+		// Preserve selection on refresh, reset on initial load
+		if oldThreadCount == 0 {
+			a.selectedThread = 0
+			a.selectedInThread = 0
+		} else {
+			// Make sure selection is still valid
+			if a.selectedThread >= len(a.threads) {
+				a.selectedThread = len(a.threads) - 1
+				if a.selectedThread < 0 {
+					a.selectedThread = 0
+				}
+			}
+			a.selectedInThread = 0
+		}
+
+		if a.threadList == nil {
+			a.threadList = views.NewThreadListView(a.width-26, a.height-6)
+		}
+		a.threadList.Select(a.selectedThread)
 		a.viewState = ViewMessages
 		return a, nil
 
@@ -409,6 +427,10 @@ func (a *App) handleMessagesKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if len(a.threads) > 0 && a.selectedThread < len(a.threads) {
 			thread := a.threads[a.selectedThread]
 			if len(thread.Emails) > 0 {
+				// If we're at the last thread, move selection up
+				if a.selectedThread >= len(a.threads)-1 && a.selectedThread > 0 {
+					a.selectedThread--
+				}
 				return a, a.archiveEmail(thread.Emails[0].ID)
 			}
 		}
@@ -446,13 +468,24 @@ func (a *App) handleThreadKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		thread.Expanded = false
 		a.viewState = ViewMessages
 	case key.Matches(msg, a.keys.Archive):
-		// Archive selected email in thread
+		// Archive selected email in thread, go back to messages
 		if a.selectedInThread < len(thread.Emails) {
+			thread.Expanded = false
+			a.viewState = ViewMessages
+			// Adjust selection if at end
+			if a.selectedThread >= len(a.threads)-1 && a.selectedThread > 0 {
+				a.selectedThread--
+			}
 			return a, a.archiveEmail(thread.Emails[a.selectedInThread].ID)
 		}
 	case key.Matches(msg, a.keys.Delete):
-		// Delete selected email in thread
+		// Delete selected email in thread, go back to messages
 		if a.selectedInThread < len(thread.Emails) {
+			thread.Expanded = false
+			a.viewState = ViewMessages
+			if a.selectedThread >= len(a.threads)-1 && a.selectedThread > 0 {
+				a.selectedThread--
+			}
 			return a, a.deleteEmail(thread.Emails[a.selectedInThread].ID)
 		}
 	}
@@ -483,6 +516,10 @@ func (a *App) handleEmailKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			emailID := a.currentEmail.ID
 			a.currentEmail = nil
 			a.viewState = ViewMessages
+			// Adjust selection if at end
+			if a.selectedThread >= len(a.threads)-1 && a.selectedThread > 0 {
+				a.selectedThread--
+			}
 			return a, a.deleteEmail(emailID)
 		}
 	case key.Matches(msg, a.keys.Archive):
@@ -490,6 +527,10 @@ func (a *App) handleEmailKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			emailID := a.currentEmail.ID
 			a.currentEmail = nil
 			a.viewState = ViewMessages
+			// Adjust selection if at end
+			if a.selectedThread >= len(a.threads)-1 && a.selectedThread > 0 {
+				a.selectedThread--
+			}
 			return a, a.archiveEmail(emailID)
 		}
 	}

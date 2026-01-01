@@ -86,23 +86,31 @@ var (
 				Align(lipgloss.Center)
 )
 
+const maxListWidth = 80
+
 // ThreadListView displays a list of threads
 type ThreadListView struct {
-	threads  []Thread
-	selected int
-	offset   int
-	width    int
-	height   int
+	threads      []Thread
+	selected     int
+	offset       int
+	width        int
+	contentWidth int
+	height       int
 }
 
 // NewThreadListView creates a new thread list view
 func NewThreadListView(width, height int) *ThreadListView {
+	contentWidth := width
+	if contentWidth > maxListWidth {
+		contentWidth = maxListWidth
+	}
 	return &ThreadListView{
-		threads:  []Thread{},
-		selected: 0,
-		offset:   0,
-		width:    width,
-		height:   height,
+		threads:      []Thread{},
+		selected:     0,
+		offset:       0,
+		width:        width,
+		contentWidth: contentWidth,
+		height:       height,
 	}
 }
 
@@ -130,6 +138,10 @@ func (v *ThreadListView) Select(index int) {
 func (v *ThreadListView) SetSize(width, height int) {
 	v.width = width
 	v.height = height
+	v.contentWidth = width
+	if v.contentWidth > maxListWidth {
+		v.contentWidth = maxListWidth
+	}
 }
 
 // View renders the thread list
@@ -141,21 +153,24 @@ func (v *ThreadListView) View() string {
 
 	var b strings.Builder
 
-	// Calculate column widths
-	fromWidth := 20
-	dateWidth := 10
-	countWidth := 4
-	subjectWidth := v.width - fromWidth - dateWidth - countWidth - 10
+	// Calculate column widths based on contentWidth (capped at maxListWidth)
+	fromWidth := 18
+	dateWidth := 8
+	countWidth := 3
+	subjectWidth := v.contentWidth - fromWidth - dateWidth - countWidth - 8
 	if subjectWidth < 10 {
 		subjectWidth = 10
 	}
 
 	// Render header
-	header := fmt.Sprintf("  %-*s  %-*s  %*s",
+	header := fmt.Sprintf("    %-*s %-*s %*s",
 		fromWidth, "FROM",
 		subjectWidth, "SUBJECT",
 		dateWidth, "DATE")
-	b.WriteString(threadHeaderStyle.Width(v.width).Render(header))
+	if len(header) > v.contentWidth {
+		header = header[:v.contentWidth]
+	}
+	b.WriteString(threadHeaderStyle.MaxWidth(v.contentWidth).Render(header))
 	b.WriteString("\n")
 
 	// Calculate visible range
@@ -187,47 +202,45 @@ func (v *ThreadListView) View() string {
 		scrollStyle := lipgloss.NewStyle().
 			Foreground(threadColorTextMuted).
 			Align(lipgloss.Right).
-			Width(v.width)
+			MaxWidth(v.contentWidth)
 		b.WriteString(scrollStyle.Render(scrollInfo))
 	}
 
-	return b.String()
+	// Center the content if width is larger than contentWidth
+	content := b.String()
+	if v.width > v.contentWidth {
+		return lipgloss.Place(v.width, 0, lipgloss.Center, lipgloss.Top, content)
+	}
+	return content
 }
 
 func (v *ThreadListView) renderThreadRow(thread Thread, selected bool, fromWidth, subjectWidth, dateWidth int) string {
-	// Unread indicator
+	// Build plain text first, then style
+
+	// Unread indicator (1 char)
 	unreadDot := " "
 	if thread.UnreadCnt > 0 {
-		unreadDot = threadUnreadDotStyle.Render("●")
+		unreadDot = "●"
 	}
 
-	// Thread/email indicator
-	// Single email: no indicator (direct open)
-	// Multi-email thread: show count with expand/collapse icon
-	countStr := ""
+	// Thread/email indicator (3 chars max)
+	countStr := "   "
 	if thread.EmailCnt > 1 {
 		if thread.Expanded {
-			countStr = threadExpandedStyle.Render(fmt.Sprintf("▼%d", thread.EmailCnt))
+			countStr = fmt.Sprintf("▼%-2d", thread.EmailCnt)
 		} else {
-			countStr = threadCountStyle.Render(fmt.Sprintf("▶%d", thread.EmailCnt))
+			countStr = fmt.Sprintf("▶%-2d", thread.EmailCnt)
 		}
-	} else {
-		// Single email - show mail icon to distinguish from threads
-		countStr = threadDateStyle.Render("◇ ")
 	}
 
-	// From
+	// From - truncate and pad
 	from := thread.From
 	if len(from) > fromWidth {
 		from = from[:fromWidth-1] + "…"
 	}
-	fromStyle := threadFromStyle
-	if thread.UnreadCnt > 0 {
-		fromStyle = threadFromUnreadStyle
-	}
-	fromStr := fromStyle.Width(fromWidth).Render(from)
+	from = fmt.Sprintf("%-*s", fromWidth, from)
 
-	// Subject
+	// Subject - truncate and pad
 	subject := thread.Subject
 	if subject == "" {
 		subject = "(no subject)"
@@ -235,21 +248,41 @@ func (v *ThreadListView) renderThreadRow(thread Thread, selected bool, fromWidth
 	if len(subject) > subjectWidth {
 		subject = subject[:subjectWidth-1] + "…"
 	}
-	subjectStyle := threadSubjectStyle
-	if thread.UnreadCnt > 0 {
-		subjectStyle = threadSubjectUnreadStyle
+	subject = fmt.Sprintf("%-*s", subjectWidth, subject)
+
+	// Date - right align
+	date := fmt.Sprintf("%*s", dateWidth, thread.Date)
+
+	// Build the row as plain text
+	row := fmt.Sprintf("%s%s%s %s %s", unreadDot, countStr, from, subject, date)
+
+	// Truncate to contentWidth to prevent any overflow
+	if len(row) > v.contentWidth {
+		row = row[:v.contentWidth]
 	}
-	subjectStr := subjectStyle.Width(subjectWidth).Render(subject)
 
-	// Date
-	dateStr := threadDateStyle.Width(dateWidth).Render(thread.Date)
-
-	// Combine row
-	row := fmt.Sprintf("%s%s %s  %s  %s", unreadDot, countStr, fromStr, subjectStr, dateStr)
-
-	// Apply selection style
+	// Now apply styling to the complete row
 	if selected {
-		return threadRowSelectedStyle.Width(v.width).Render(row)
+		return threadRowSelectedStyle.MaxWidth(v.contentWidth).Render(row)
 	}
-	return threadRowStyle.Width(v.width).Render(row)
+
+	// For unselected, style individual parts
+	var styled strings.Builder
+	if thread.UnreadCnt > 0 {
+		styled.WriteString(threadUnreadDotStyle.Render(unreadDot))
+		styled.WriteString(threadCountStyle.Render(countStr))
+		styled.WriteString(threadFromUnreadStyle.Render(from))
+		styled.WriteString(" ")
+		styled.WriteString(threadSubjectUnreadStyle.Render(subject))
+	} else {
+		styled.WriteString(threadDateStyle.Render(unreadDot))
+		styled.WriteString(threadDateStyle.Render(countStr))
+		styled.WriteString(threadFromStyle.Render(from))
+		styled.WriteString(" ")
+		styled.WriteString(threadSubjectStyle.Render(subject))
+	}
+	styled.WriteString(" ")
+	styled.WriteString(threadDateStyle.Render(date))
+
+	return threadRowStyle.MaxWidth(v.contentWidth).Render(styled.String())
 }
