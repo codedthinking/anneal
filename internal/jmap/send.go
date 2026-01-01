@@ -58,12 +58,38 @@ func (c *Client) GetDefaultIdentity() (*Identity, error) {
 	return &identities[0], nil
 }
 
-// SendEmail creates and sends an email
+// SendEmail creates and sends an email using the default identity
 func (c *Client) SendEmail(to, cc []string, subject, body string, inReplyTo, references []string) error {
-	// Get default identity
-	ident, err := c.GetDefaultIdentity()
-	if err != nil {
-		return err
+	return c.SendEmailWithIdentity(to, cc, subject, body, inReplyTo, references, "")
+}
+
+// SendEmailWithIdentity creates and sends an email using a specific identity
+func (c *Client) SendEmailWithIdentity(to, cc []string, subject, body string, inReplyTo, references []string, identityID string) error {
+	// Get identity
+	var ident *Identity
+	var err error
+
+	if identityID != "" {
+		// Find specific identity
+		identities, err := c.GetIdentities()
+		if err != nil {
+			return err
+		}
+		for i := range identities {
+			if identities[i].ID == identityID {
+				ident = &identities[i]
+				break
+			}
+		}
+		if ident == nil {
+			return fmt.Errorf("identity not found: %s", identityID)
+		}
+	} else {
+		// Use default identity
+		ident, err = c.GetDefaultIdentity()
+		if err != nil {
+			return err
+		}
 	}
 
 	// Get drafts mailbox for temporary storage

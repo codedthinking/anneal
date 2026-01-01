@@ -56,11 +56,19 @@ var (
 				MarginTop(1)
 )
 
+// Identity represents a sending identity
+type Identity struct {
+	ID    string
+	Name  string
+	Email string
+}
+
 // ComposeField indicates which field is focused
 type ComposeField int
 
 const (
-	FieldTo ComposeField = iota
+	FieldFrom ComposeField = iota
+	FieldTo
 	FieldCc
 	FieldSubject
 	FieldBody
@@ -70,6 +78,9 @@ const (
 type ComposeView struct {
 	Mode     ComposeMode
 	Original *models.Email
+
+	identities       []Identity
+	selectedIdentity int
 
 	to      textinput.Model
 	cc      textinput.Model
@@ -82,7 +93,7 @@ type ComposeView struct {
 }
 
 // NewComposeView creates a new compose view
-func NewComposeView(width, height int) *ComposeView {
+func NewComposeView(width, height int, identities []Identity) *ComposeView {
 	// To field
 	to := textinput.New()
 	to.Placeholder = "recipient@example.com"
@@ -119,15 +130,23 @@ func NewComposeView(width, height int) *ComposeView {
 	body.FocusedStyle.CursorLine = lipgloss.NewStyle().Background(composeColorBgSelect)
 	body.ShowLineNumbers = false
 
+	// Start on From field if multiple identities, otherwise To field
+	startField := FieldTo
+	if len(identities) > 1 {
+		startField = FieldFrom
+	}
+
 	return &ComposeView{
-		Mode:    ModeCompose,
-		to:      to,
-		cc:      cc,
-		subject: subject,
-		body:    body,
-		focused: FieldTo,
-		width:   width,
-		height:  height,
+		Mode:             ModeCompose,
+		identities:       identities,
+		selectedIdentity: 0,
+		to:               to,
+		cc:               cc,
+		subject:          subject,
+		body:             body,
+		focused:          startField,
+		width:            width,
+		height:           height,
 	}
 }
 
@@ -274,6 +293,11 @@ func (v *ComposeView) RemoveSelfFromCC(myEmail string) {
 }
 
 func (v *ComposeView) focusField(field ComposeField) {
+	// Skip From field if only one identity
+	if field == FieldFrom && len(v.identities) <= 1 {
+		field = FieldTo
+	}
+
 	v.focused = field
 	v.to.Blur()
 	v.cc.Blur()
@@ -281,6 +305,8 @@ func (v *ComposeView) focusField(field ComposeField) {
 	v.body.Blur()
 
 	switch field {
+	case FieldFrom:
+		// No input widget for From, just visual focus
 	case FieldTo:
 		v.to.Focus()
 	case FieldCc:
@@ -298,6 +324,24 @@ func (v *ComposeView) Update(msg tea.Msg) (*ComposeView, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		// Handle From field identity selection
+		if v.focused == FieldFrom && len(v.identities) > 1 {
+			switch msg.String() {
+			case "left", "h":
+				v.selectedIdentity--
+				if v.selectedIdentity < 0 {
+					v.selectedIdentity = len(v.identities) - 1
+				}
+				return v, nil
+			case "right", "l", "enter":
+				v.selectedIdentity++
+				if v.selectedIdentity >= len(v.identities) {
+					v.selectedIdentity = 0
+				}
+				return v, nil
+			}
+		}
+
 		switch msg.String() {
 		case "tab", "down":
 			// Move to next field
@@ -307,7 +351,11 @@ func (v *ComposeView) Update(msg tea.Msg) (*ComposeView, tea.Cmd) {
 			}
 		case "shift+tab", "up":
 			// Move to previous field (only from header fields)
-			if v.focused > FieldTo && v.focused < FieldBody {
+			minField := FieldTo
+			if len(v.identities) > 1 {
+				minField = FieldFrom
+			}
+			if v.focused > minField && v.focused < FieldBody {
 				v.focusField(v.focused - 1)
 				return v, nil
 			}
@@ -320,6 +368,8 @@ func (v *ComposeView) Update(msg tea.Msg) (*ComposeView, tea.Cmd) {
 	// Update the focused component
 	var cmd tea.Cmd
 	switch v.focused {
+	case FieldFrom:
+		// From field doesn't have an input widget
 	case FieldTo:
 		v.to, cmd = v.to.Update(msg)
 	case FieldCc:
@@ -352,6 +402,36 @@ func (v *ComposeView) View() string {
 	b.WriteString(header)
 	b.WriteString("\n\n")
 
+	// From field (only if multiple identities)
+	if len(v.identities) > 1 {
+		fromLabel := composeLabelStyle.Render("from: ")
+		b.WriteString(fromLabel)
+
+		// Get current identity display
+		identityStr := ""
+		if v.selectedIdentity < len(v.identities) {
+			id := v.identities[v.selectedIdentity]
+			if id.Name != "" {
+				identityStr = fmt.Sprintf("%s <%s>", id.Name, id.Email)
+			} else {
+				identityStr = id.Email
+			}
+		}
+
+		// Style based on focus
+		if v.focused == FieldFrom {
+			// Show arrows for cycling
+			fromStyle := lipgloss.NewStyle().
+				Foreground(composeColorPrimary).
+				Background(composeColorBgSelect)
+			b.WriteString(fromStyle.Render(fmt.Sprintf("◀ %s ▶", identityStr)))
+		} else {
+			fromStyle := lipgloss.NewStyle().Foreground(composeColorSecondary)
+			b.WriteString(fromStyle.Render(identityStr))
+		}
+		b.WriteString("\n")
+	}
+
 	// To field
 	toLabel := composeLabelStyle.Render("to: ")
 	b.WriteString(toLabel)
@@ -374,8 +454,12 @@ func (v *ComposeView) View() string {
 	b.WriteString(v.body.View())
 	b.WriteString("\n")
 
-	// Help
-	help := composeHelpStyle.Render("tab: next field │ ctrl+s: send │ esc: cancel")
+	// Help - add arrows hint if on From field
+	helpText := "tab: next field │ ctrl+s: send │ esc: cancel"
+	if v.focused == FieldFrom {
+		helpText = "←/→: change identity │ tab: next field │ ctrl+s: send │ esc: cancel"
+	}
+	help := composeHelpStyle.Render(helpText)
 	b.WriteString(help)
 
 	return b.String()
@@ -419,4 +503,12 @@ func (v *ComposeView) IsEmpty() bool {
 // HasRecipients returns true if there's at least one recipient
 func (v *ComposeView) HasRecipients() bool {
 	return strings.TrimSpace(v.to.Value()) != ""
+}
+
+// GetIdentity returns the selected sending identity
+func (v *ComposeView) GetIdentity() *Identity {
+	if v.selectedIdentity < len(v.identities) {
+		return &v.identities[v.selectedIdentity]
+	}
+	return nil
 }

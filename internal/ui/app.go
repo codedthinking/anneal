@@ -68,6 +68,7 @@ type App struct {
 	selectedThread  int
 	selectedInThread int
 	currentEmail    *models.Email
+	identities      []jmap.Identity
 
 	// Views
 	mailboxView *views.MailboxView
@@ -108,7 +109,13 @@ func (a *App) Init() tea.Cmd {
 	return tea.Batch(
 		a.spinner.Tick,
 		a.loadMailboxesCacheFirst,
+		a.loadIdentities,
 	)
+}
+
+func (a *App) loadIdentities() tea.Msg {
+	identities, err := a.client.GetIdentities()
+	return identitiesLoadedMsg{identities: identities, err: err}
 }
 
 // Msg types for async operations
@@ -146,6 +153,11 @@ type emailSentMsg struct {
 
 type attachmentOpenedMsg struct {
 	err error
+}
+
+type identitiesLoadedMsg struct {
+	identities []jmap.Identity
+	err        error
 }
 
 // loadMailboxesCacheFirst tries cache first, then falls back to network
@@ -338,6 +350,12 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 
+		// Clear error on any key if error is showing
+		if a.err != nil {
+			a.err = nil
+			return a, nil
+		}
+
 		// Handle navigation
 		return a.handleKeyPress(msg)
 
@@ -439,8 +457,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case emailActionMsg:
 		if msg.err != nil {
 			a.err = msg.err
+			// Don't refresh on error - let user see the error
+			return a, nil
 		}
-		// Force refresh from network after action (skip cache)
+		// Force refresh from network after successful action (skip cache)
 		if len(a.mailboxes) > 0 && a.selectedMailbox < len(a.mailboxes) {
 			return a, a.loadEmailsFresh(a.mailboxes[a.selectedMailbox].ID)
 		}
@@ -464,6 +484,14 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a.emailReader != nil && a.emailReader.InAttachmentMode() {
 			a.emailReader.ToggleAttachmentMode()
 		}
+		return a, nil
+
+	case identitiesLoadedMsg:
+		if msg.err != nil {
+			// Non-fatal - just won't have identity selection
+			return a, nil
+		}
+		a.identities = msg.identities
 		return a, nil
 
 	case syncCompleteMsg:
@@ -850,7 +878,17 @@ func (a *App) handleAttachmentKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 // startCompose initializes the compose view
 func (a *App) startCompose(email *models.Email, mode views.ComposeMode) (tea.Model, tea.Cmd) {
-	a.composeView = views.NewComposeView(a.width-26, a.height-8)
+	// Convert jmap identities to view identities
+	viewIdentities := make([]views.Identity, len(a.identities))
+	for i, id := range a.identities {
+		viewIdentities[i] = views.Identity{
+			ID:    id.ID,
+			Name:  id.Name,
+			Email: id.Email,
+		}
+	}
+
+	a.composeView = views.NewComposeView(a.width-26, a.height-8, viewIdentities)
 
 	switch mode {
 	case views.ModeReply:
@@ -893,12 +931,19 @@ func (a *App) handleComposeKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 		to, cc, subject, body := a.composeView.GetValues()
 		original := a.composeView.Original
+		identity := a.composeView.GetIdentity()
+
+		// Get identity ID (or empty for default)
+		identityID := ""
+		if identity != nil {
+			identityID = identity.ID
+		}
 
 		// Return to previous view
 		a.viewState = a.prevViewState
 		a.composeView = nil
 
-		return a, a.sendEmail(to, cc, subject, body, original)
+		return a, a.sendEmail(to, cc, subject, body, original, identityID)
 	}
 
 	// Pass to compose view
@@ -946,7 +991,14 @@ func (a *App) archiveThread(emailIDs []string) tea.Cmd {
 			}
 		}
 		if archiveID == "" {
-			return emailActionMsg{err: fmt.Errorf("archive mailbox not found")}
+			// Debug: list available roles
+			var roles []string
+			for _, mb := range a.mailboxes {
+				if mb.Role != "" {
+					roles = append(roles, fmt.Sprintf("%s=%s", mb.Name, mb.Role))
+				}
+			}
+			return emailActionMsg{err: fmt.Errorf("archive mailbox not found (roles: %v)", roles)}
 		}
 		// Archive all emails in the thread
 		for _, emailID := range emailIDs {
@@ -1019,7 +1071,7 @@ func (a *App) openAttachment(att *models.Attachment) tea.Cmd {
 	}
 }
 
-func (a *App) sendEmail(to, cc []string, subject, body string, original *models.Email) tea.Cmd {
+func (a *App) sendEmail(to, cc []string, subject, body string, original *models.Email, identityID string) tea.Cmd {
 	return func() tea.Msg {
 		var inReplyTo, references []string
 
@@ -1029,7 +1081,7 @@ func (a *App) sendEmail(to, cc []string, subject, body string, original *models.
 			// Could add references chain here if needed
 		}
 
-		err := a.client.SendEmail(to, cc, subject, body, inReplyTo, references)
+		err := a.client.SendEmailWithIdentity(to, cc, subject, body, inReplyTo, references, identityID)
 		return emailSentMsg{err: err}
 	}
 }
