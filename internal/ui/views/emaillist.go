@@ -5,72 +5,61 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/koren/tuimail/internal/models"
+	"github.com/the9x/anneal/internal/models"
 )
 
-// Cyberpunk styles for email list
+// anneal brand colors
 var (
-	// Colors
-	listColorNeonCyan   = lipgloss.Color("#00FFFF")
-	listColorNeonPink   = lipgloss.Color("#FF2E97")
-	listColorNeonOrange = lipgloss.Color("#FF6B35")
-	listColorTextBright = lipgloss.Color("#EAEAEA")
-	listColorTextNormal = lipgloss.Color("#B8B8B8")
-	listColorTextMuted  = lipgloss.Color("#5C5C7A")
-	listColorTextDim    = lipgloss.Color("#3D3D5C")
-	listColorBgLight    = lipgloss.Color("#16213E")
-	listColorBgSelect   = lipgloss.Color("#2D2D5A")
+	listColorPrimary   = lipgloss.Color("#d4d2e3")
+	listColorSecondary = lipgloss.Color("#9795b5")
+	listColorDim       = lipgloss.Color("#5a5880")
+	listColorBg        = lipgloss.Color("#1d1d40")
+	listColorBgSelect  = lipgloss.Color("#2d2d5a")
+	listColorAccent    = lipgloss.Color("#e61e25") // used sparingly
 
 	emailListHeaderStyle = lipgloss.NewStyle().
-				Foreground(listColorTextMuted).
-				Background(listColorBgLight).
-				Bold(true).
-				Padding(0, 1).
-				BorderStyle(lipgloss.NormalBorder()).
-				BorderBottom(true).
-				BorderForeground(listColorTextDim)
+				Foreground(listColorDim).
+				Background(listColorBg).
+				Padding(0, 1)
 
 	emailRowStyle = lipgloss.NewStyle().
-			Foreground(listColorTextNormal).
+			Foreground(listColorPrimary).
 			Padding(0, 1)
 
 	emailRowSelectedStyle = lipgloss.NewStyle().
-				Foreground(listColorTextBright).
+				Foreground(listColorPrimary).
 				Background(listColorBgSelect).
-				Padding(0, 1).
-				BorderStyle(lipgloss.NormalBorder()).
-				BorderLeft(true).
-				BorderForeground(listColorNeonCyan)
+				Bold(true).
+				Padding(0, 1)
 
 	emailUnreadDotStyle = lipgloss.NewStyle().
-				Foreground(listColorNeonPink).
-				Bold(true)
+				Foreground(listColorPrimary)
 
 	emailFromStyle = lipgloss.NewStyle().
-			Foreground(listColorTextNormal)
+			Foreground(listColorPrimary)
 
 	emailFromUnreadStyle = lipgloss.NewStyle().
-				Foreground(listColorNeonCyan).
+				Foreground(listColorPrimary).
 				Bold(true)
 
 	emailSubjectStyle = lipgloss.NewStyle().
-				Foreground(listColorTextNormal)
+				Foreground(listColorSecondary)
 
 	emailSubjectUnreadStyle = lipgloss.NewStyle().
-				Foreground(listColorTextBright).
+				Foreground(listColorPrimary).
 				Bold(true)
 
 	emailDateStyle = lipgloss.NewStyle().
-			Foreground(listColorTextMuted)
+			Foreground(listColorDim)
 
 	emailFlagStyle = lipgloss.NewStyle().
-			Foreground(listColorNeonOrange)
+			Foreground(listColorAccent)
 
 	emailAttachStyle = lipgloss.NewStyle().
-				Foreground(listColorTextMuted)
+				Foreground(listColorDim)
 
 	emptyListStyle = lipgloss.NewStyle().
-			Foreground(listColorTextMuted).
+			Foreground(listColorDim).
 			Padding(2).
 			Align(lipgloss.Center)
 )
@@ -144,9 +133,9 @@ func (v *EmailListView) View() string {
 
 	// Render header
 	header := fmt.Sprintf("  %-*s  %-*s  %*s",
-		fromWidth, "FROM",
-		subjectWidth, "SUBJECT",
-		dateWidth, "DATE")
+		fromWidth, "from",
+		subjectWidth, "subject",
+		dateWidth, "date")
 	b.WriteString(emailListHeaderStyle.Width(v.width).Render(header))
 	b.WriteString("\n")
 
@@ -177,7 +166,7 @@ func (v *EmailListView) View() string {
 		b.WriteString("\n")
 		scrollInfo := fmt.Sprintf(" ▾ %d/%d ", v.selected+1, len(v.emails))
 		scrollStyle := lipgloss.NewStyle().
-			Foreground(listColorTextMuted).
+			Foreground(listColorDim).
 			Align(lipgloss.Right).
 			Width(v.width)
 		b.WriteString(scrollStyle.Render(scrollInfo))

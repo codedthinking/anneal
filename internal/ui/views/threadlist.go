@@ -19,69 +19,57 @@ type Thread struct {
 	Expanded  bool
 }
 
-// Cyberpunk styles for thread list
+// anneal brand colors
 var (
-	threadColorNeonCyan   = lipgloss.Color("#00FFFF")
-	threadColorNeonPink   = lipgloss.Color("#FF2E97")
-	threadColorNeonPurple = lipgloss.Color("#BD00FF")
-	threadColorTextBright = lipgloss.Color("#EAEAEA")
-	threadColorTextNormal = lipgloss.Color("#B8B8B8")
-	threadColorTextMuted  = lipgloss.Color("#5C5C7A")
-	threadColorTextDim    = lipgloss.Color("#3D3D5C")
-	threadColorBgLight    = lipgloss.Color("#16213E")
-	threadColorBgSelect   = lipgloss.Color("#2D2D5A")
+	thColorPrimary   = lipgloss.Color("#d4d2e3")
+	thColorSecondary = lipgloss.Color("#9795b5")
+	thColorDim       = lipgloss.Color("#5a5880")
+	thColorBg        = lipgloss.Color("#1d1d40")
+	thColorBgSelect  = lipgloss.Color("#2d2d5a")
 
 	threadHeaderStyle = lipgloss.NewStyle().
-				Foreground(threadColorTextMuted).
-				Background(threadColorBgLight).
-				Bold(true).
-				Padding(0, 1).
-				BorderStyle(lipgloss.NormalBorder()).
-				BorderBottom(true).
-				BorderForeground(threadColorTextDim)
+				Foreground(thColorDim).
+				Background(thColorBg).
+				Padding(0, 1)
 
 	threadRowStyle = lipgloss.NewStyle().
-			Foreground(threadColorTextNormal).
+			Foreground(thColorPrimary).
 			Padding(0, 1)
 
 	threadRowSelectedStyle = lipgloss.NewStyle().
-				Foreground(threadColorTextBright).
-				Background(threadColorBgSelect).
-				Padding(0, 1).
-				BorderStyle(lipgloss.NormalBorder()).
-				BorderLeft(true).
-				BorderForeground(threadColorNeonCyan)
+				Foreground(thColorPrimary).
+				Background(thColorBgSelect).
+				Bold(true).
+				Padding(0, 1)
 
 	threadUnreadDotStyle = lipgloss.NewStyle().
-				Foreground(threadColorNeonPink).
-				Bold(true)
+				Foreground(thColorPrimary)
 
 	threadFromStyle = lipgloss.NewStyle().
-			Foreground(threadColorTextNormal)
+			Foreground(thColorPrimary)
 
 	threadFromUnreadStyle = lipgloss.NewStyle().
-				Foreground(threadColorNeonCyan).
+				Foreground(thColorPrimary).
 				Bold(true)
 
 	threadSubjectStyle = lipgloss.NewStyle().
-				Foreground(threadColorTextNormal)
+				Foreground(thColorSecondary)
 
 	threadSubjectUnreadStyle = lipgloss.NewStyle().
-					Foreground(threadColorTextBright).
+					Foreground(thColorPrimary).
 					Bold(true)
 
 	threadCountStyle = lipgloss.NewStyle().
-				Foreground(threadColorNeonPurple).
-				Bold(true)
+				Foreground(thColorPrimary)
 
 	threadDateStyle = lipgloss.NewStyle().
-			Foreground(threadColorTextMuted)
+			Foreground(thColorDim)
 
 	threadExpandedStyle = lipgloss.NewStyle().
-				Foreground(threadColorNeonCyan)
+				Foreground(thColorPrimary)
 
 	threadEmptyStyle = lipgloss.NewStyle().
-				Foreground(threadColorTextMuted).
+				Foreground(thColorDim).
 				Padding(2).
 				Align(lipgloss.Center)
 )
@@ -164,9 +152,9 @@ func (v *ThreadListView) View() string {
 
 	// Render header
 	header := fmt.Sprintf("    %-*s %-*s %*s",
-		fromWidth, "FROM",
-		subjectWidth, "SUBJECT",
-		dateWidth, "DATE")
+		fromWidth, "from",
+		subjectWidth, "subject",
+		dateWidth, "date")
 	if len(header) > v.contentWidth {
 		header = header[:v.contentWidth]
 	}
@@ -200,7 +188,7 @@ func (v *ThreadListView) View() string {
 		b.WriteString("\n")
 		scrollInfo := fmt.Sprintf(" ▾ %d/%d ", v.selected+1, len(v.threads))
 		scrollStyle := lipgloss.NewStyle().
-			Foreground(threadColorTextMuted).
+			Foreground(thColorDim).
 			Align(lipgloss.Right).
 			MaxWidth(v.contentWidth)
 		b.WriteString(scrollStyle.Render(scrollInfo))

@@ -2,308 +2,227 @@ package ui
 
 import "github.com/charmbracelet/lipgloss"
 
-// Blade Runner / Cyberpunk color palette
+// anneal color palette — the9x.ac brand
 var (
-	// Neon accents
-	ColorNeonPink   = lipgloss.Color("#FF2E97")
-	ColorNeonCyan   = lipgloss.Color("#00FFFF")
-	ColorNeonPurple = lipgloss.Color("#BD00FF")
-	ColorNeonBlue   = lipgloss.Color("#00D4FF")
-	ColorNeonOrange = lipgloss.Color("#FF6B35")
+	// Core colors
+	ColorBg        = lipgloss.Color("#1d1d40") // background
+	ColorPrimary   = lipgloss.Color("#d4d2e3") // primary text
+	ColorSecondary = lipgloss.Color("#9795b5") // secondary text
+	ColorAccent    = lipgloss.Color("#e61e25") // accent (used sparingly)
 
-	// Background layers
-	ColorBgDark    = lipgloss.Color("#0D0D0D")
-	ColorBgMid     = lipgloss.Color("#1A1A2E")
-	ColorBgLight   = lipgloss.Color("#16213E")
-	ColorBgHover   = lipgloss.Color("#1F1F3D")
-	ColorBgSelect  = lipgloss.Color("#2D2D5A")
-
-	// Text
-	ColorTextBright = lipgloss.Color("#EAEAEA")
-	ColorTextNormal = lipgloss.Color("#B8B8B8")
-	ColorTextMuted  = lipgloss.Color("#5C5C7A")
-	ColorTextDim    = lipgloss.Color("#3D3D5C")
-
-	// Status
-	ColorSuccess = lipgloss.Color("#00FF9F")
-	ColorWarning = lipgloss.Color("#FFE66D")
-	ColorError   = lipgloss.Color("#FF4757")
-	ColorInfo    = lipgloss.Color("#70A1FF")
+	// Derived shades
+	ColorBgLight  = lipgloss.Color("#252550") // slightly lighter bg
+	ColorBgSelect = lipgloss.Color("#2d2d5a") // selection bg
+	ColorDim      = lipgloss.Color("#5a5880") // dim text
 )
 
-// Gradient-like borders using special characters
+// Minimal borders
 var (
-	BorderNeon = lipgloss.Border{
-		Top:         "━",
-		Bottom:      "━",
-		Left:        "┃",
-		Right:       "┃",
-		TopLeft:     "┏",
-		TopRight:    "┓",
-		BottomLeft:  "┗",
-		BottomRight: "┛",
-	}
-
-	BorderSoft = lipgloss.Border{
-		Top:         "─",
-		Bottom:      "─",
-		Left:        "│",
-		Right:       "│",
-		TopLeft:     "╭",
-		TopRight:    "╮",
-		BottomLeft:  "╰",
-		BottomRight: "╯",
+	BorderMinimal = lipgloss.Border{
+		Top:    "─",
+		Bottom: "─",
 	}
 )
 
 // App frame
 var (
 	AppStyle = lipgloss.NewStyle().
-			Background(ColorBgDark)
+			Background(ColorBg)
 )
 
-// Header bar - neon gradient feel
+// Header - minimal, just the name
 var (
 	HeaderStyle = lipgloss.NewStyle().
-			Foreground(ColorTextBright).
-			Background(ColorBgMid).
-			BorderStyle(lipgloss.NormalBorder()).
-			BorderBottom(true).
-			BorderForeground(ColorNeonPink).
-			Padding(0, 2).
-			Bold(true)
+			Foreground(ColorSecondary).
+			Background(ColorBg).
+			Padding(0, 2)
 
 	HeaderTitleStyle = lipgloss.NewStyle().
-				Foreground(ColorNeonCyan).
+				Foreground(ColorPrimary).
 				Bold(true)
 
 	HeaderAccountStyle = lipgloss.NewStyle().
-				Foreground(ColorNeonPink)
+				Foreground(ColorSecondary)
 
 	LogoStyle = lipgloss.NewStyle().
-			Foreground(ColorNeonCyan).
+			Foreground(ColorPrimary).
 			Bold(true)
 )
 
-// Sidebar
+// No sidebar in anneal - single pane focus
 var (
 	SidebarStyle = lipgloss.NewStyle().
 			Width(24).
-			Background(ColorBgMid).
-			BorderStyle(BorderSoft).
-			BorderRight(true).
-			BorderForeground(ColorTextDim).
+			Background(ColorBg).
 			Padding(1, 0)
 
-	SidebarActiveStyle = lipgloss.NewStyle().
-				Width(24).
-				Background(ColorBgMid).
-				BorderStyle(BorderNeon).
-				BorderRight(true).
-				BorderForeground(ColorNeonPurple).
-				Padding(1, 0)
+	SidebarActiveStyle = SidebarStyle
 
 	SidebarTitleStyle = lipgloss.NewStyle().
-				Foreground(ColorNeonPurple).
-				Bold(true).
+				Foreground(ColorSecondary).
 				Padding(0, 2).
 				MarginBottom(1)
 
 	MailboxStyle = lipgloss.NewStyle().
-			Foreground(ColorTextNormal).
+			Foreground(ColorSecondary).
 			Padding(0, 2)
 
 	MailboxSelectedStyle = lipgloss.NewStyle().
-				Foreground(ColorNeonCyan).
+				Foreground(ColorPrimary).
 				Background(ColorBgSelect).
-				Bold(true).
 				Padding(0, 2)
 
 	MailboxUnreadStyle = lipgloss.NewStyle().
-				Foreground(ColorNeonPink).
-				Bold(true)
+				Foreground(ColorPrimary)
 )
 
-// Email list
+// Message list
 var (
 	EmailListStyle = lipgloss.NewStyle().
-			Background(ColorBgDark).
+			Background(ColorBg).
 			Padding(0, 1)
 
 	EmailListHeaderStyle = lipgloss.NewStyle().
-				Foreground(ColorTextMuted).
-				Background(ColorBgLight).
-				Bold(true).
-				Padding(0, 1).
-				BorderStyle(lipgloss.NormalBorder()).
-				BorderBottom(true).
-				BorderForeground(ColorTextDim)
+				Foreground(ColorDim).
+				Background(ColorBg).
+				Padding(0, 1)
 
 	EmailItemStyle = lipgloss.NewStyle().
-			Foreground(ColorTextNormal).
+			Foreground(ColorSecondary).
 			Padding(0, 1)
 
 	EmailItemSelectedStyle = lipgloss.NewStyle().
-				Foreground(ColorTextBright).
+				Foreground(ColorPrimary).
 				Background(ColorBgSelect).
-				BorderStyle(lipgloss.NormalBorder()).
-				BorderLeft(true).
-				BorderForeground(ColorNeonCyan).
 				Padding(0, 1)
 
 	EmailUnreadDotStyle = lipgloss.NewStyle().
-				Foreground(ColorNeonPink).
-				Bold(true)
+				Foreground(ColorPrimary)
 
 	EmailFromStyle = lipgloss.NewStyle().
-			Foreground(ColorTextNormal)
+			Foreground(ColorSecondary)
 
 	EmailFromUnreadStyle = lipgloss.NewStyle().
-				Foreground(ColorNeonCyan).
-				Bold(true)
+				Foreground(ColorPrimary)
 
 	EmailSubjectStyle = lipgloss.NewStyle().
-				Foreground(ColorTextNormal)
+				Foreground(ColorSecondary)
 
 	EmailSubjectUnreadStyle = lipgloss.NewStyle().
-				Foreground(ColorTextBright).
-				Bold(true)
+				Foreground(ColorPrimary)
 
 	EmailPreviewStyle = lipgloss.NewStyle().
-				Foreground(ColorTextMuted)
+				Foreground(ColorDim)
 
 	EmailDateStyle = lipgloss.NewStyle().
-			Foreground(ColorTextMuted)
+			Foreground(ColorDim)
 
 	EmailFlagStyle = lipgloss.NewStyle().
-			Foreground(ColorNeonOrange)
+			Foreground(ColorAccent)
 
 	EmailAttachmentStyle = lipgloss.NewStyle().
-				Foreground(ColorTextMuted)
+				Foreground(ColorDim)
 )
 
 // Email reader
 var (
 	EmailReaderStyle = lipgloss.NewStyle().
-				Background(ColorBgDark).
+				Background(ColorBg).
 				Padding(1, 2)
 
 	EmailReaderHeaderStyle = lipgloss.NewStyle().
-				Background(ColorBgLight).
-				BorderStyle(BorderSoft).
-				BorderForeground(ColorTextDim).
-				Padding(1, 2).
+				Background(ColorBg).
+				Padding(1, 0).
 				MarginBottom(1)
 
 	EmailReaderLabelStyle = lipgloss.NewStyle().
-				Foreground(ColorNeonPurple).
-				Bold(true).
-				Width(10)
+				Foreground(ColorDim).
+				Width(8)
 
 	EmailReaderValueStyle = lipgloss.NewStyle().
-				Foreground(ColorTextBright)
+				Foreground(ColorPrimary)
 
 	EmailReaderSubjectStyle = lipgloss.NewStyle().
-				Foreground(ColorNeonCyan).
-				Bold(true).
+				Foreground(ColorPrimary).
 				MarginTop(1).
 				MarginBottom(1)
 
 	EmailReaderBodyStyle = lipgloss.NewStyle().
-				Foreground(ColorTextNormal)
+				Foreground(ColorSecondary)
 
 	EmailReaderAttachmentStyle = lipgloss.NewStyle().
-					Foreground(ColorTextMuted).
+					Foreground(ColorDim).
 					MarginTop(1)
 
 	EmailReaderScrollStyle = lipgloss.NewStyle().
-				Foreground(ColorNeonPink).
+				Foreground(ColorDim).
 				Align(lipgloss.Right)
 )
 
-// Status bar - bottom bar with neon accent
+// Status bar - minimal
 var (
 	StatusBarStyle = lipgloss.NewStyle().
-			Foreground(ColorTextMuted).
-			Background(ColorBgMid).
-			BorderStyle(lipgloss.NormalBorder()).
-			BorderTop(true).
-			BorderForeground(ColorNeonPurple).
+			Foreground(ColorDim).
+			Background(ColorBg).
 			Padding(0, 2)
 
 	StatusKeyStyle = lipgloss.NewStyle().
-			Foreground(ColorNeonCyan).
-			Bold(true)
+			Foreground(ColorPrimary)
 
 	StatusDescStyle = lipgloss.NewStyle().
-			Foreground(ColorTextMuted)
+			Foreground(ColorDim)
 
 	StatusModeStyle = lipgloss.NewStyle().
-			Foreground(ColorBgDark).
-			Background(ColorNeonPink).
-			Bold(true).
-			Padding(0, 1)
+			Foreground(ColorSecondary)
 )
 
-// Help overlay
+// Help - minimal
 var (
 	HelpStyle = lipgloss.NewStyle().
-			Foreground(ColorTextMuted).
-			Background(ColorBgMid).
-			BorderStyle(BorderSoft).
-			BorderForeground(ColorNeonPurple).
-			Padding(1, 2)
+			Foreground(ColorDim).
+			Background(ColorBg).
+			Padding(0, 2)
 
 	HelpKeyStyle = lipgloss.NewStyle().
-			Foreground(ColorNeonCyan).
-			Bold(true)
+			Foreground(ColorSecondary)
 
 	HelpDescStyle = lipgloss.NewStyle().
-			Foreground(ColorTextNormal)
+			Foreground(ColorDim)
 
 	HelpSepStyle = lipgloss.NewStyle().
-			Foreground(ColorTextDim)
+			Foreground(ColorDim)
 )
 
-// Spinner/Loading
+// Loading - calm, no urgency
 var (
 	SpinnerStyle = lipgloss.NewStyle().
-			Foreground(ColorNeonCyan)
+			Foreground(ColorSecondary)
 
 	LoadingStyle = lipgloss.NewStyle().
-			Foreground(ColorNeonPink).
-			Bold(true)
+			Foreground(ColorSecondary)
 )
 
-// Error/Success messages
+// No red error states per brand guide
 var (
 	ErrorStyle = lipgloss.NewStyle().
-			Foreground(ColorError).
-			Background(ColorBgMid).
-			BorderStyle(BorderSoft).
-			BorderForeground(ColorError).
-			Bold(true).
+			Foreground(ColorSecondary).
+			Background(ColorBg).
 			Padding(1, 2)
 
 	SuccessStyle = lipgloss.NewStyle().
-			Foreground(ColorSuccess).
-			Bold(true)
+			Foreground(ColorSecondary)
 
 	WarningStyle = lipgloss.NewStyle().
-			Foreground(ColorWarning).
-			Bold(true)
+			Foreground(ColorSecondary)
 )
 
-// Dialog/Modal
+// Dialog - minimal
 var (
 	DialogStyle = lipgloss.NewStyle().
 			Background(ColorBgLight).
-			BorderStyle(BorderNeon).
-			BorderForeground(ColorNeonPink).
 			Padding(2, 4)
 
 	DialogTitleStyle = lipgloss.NewStyle().
-				Foreground(ColorNeonCyan).
-				Bold(true).
+				Foreground(ColorPrimary).
 				MarginBottom(1)
 )

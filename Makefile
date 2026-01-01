@@ -3,7 +3,7 @@
 GO := /opt/homebrew/bin/go
 
 build:
-	$(GO) build -o bin/tuimail ./main.go
+	$(GO) build -o bin/anneal ./main.go
 
 run:
 	$(GO) run ./main.go
@@ -21,4 +21,4 @@ deps:
 	$(GO) mod tidy
 
 install: build
-	cp bin/tuimail /usr/local/bin/tuimail
+	cp bin/anneal /usr/local/bin/anneal

@@ -6,47 +6,40 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/koren/tuimail/internal/models"
+	"github.com/the9x/anneal/internal/models"
 )
 
-// Cyberpunk styles for mailbox view
+// anneal brand colors
 var (
-	// Colors
-	colorNeonCyan   = lipgloss.Color("#00FFFF")
-	colorNeonPink   = lipgloss.Color("#FF2E97")
-	colorNeonPurple = lipgloss.Color("#BD00FF")
-	colorTextNormal = lipgloss.Color("#B8B8B8")
-	colorTextMuted  = lipgloss.Color("#5C5C7A")
-	colorBgSelect   = lipgloss.Color("#2D2D5A")
+	mbColorPrimary   = lipgloss.Color("#d4d2e3")
+	mbColorSecondary = lipgloss.Color("#9795b5")
+	mbColorDim       = lipgloss.Color("#5a5880")
+	mbColorBg        = lipgloss.Color("#1d1d40")
+	mbColorBgSelect  = lipgloss.Color("#2d2d5a")
 
 	mailboxTitleStyle = lipgloss.NewStyle().
-				Foreground(colorNeonPurple).
-				Bold(true).
+				Foreground(mbColorSecondary).
 				Padding(0, 1).
 				MarginBottom(1)
 
 	mailboxItemStyle = lipgloss.NewStyle().
-				Foreground(colorTextNormal).
+				Foreground(mbColorPrimary).
 				PaddingLeft(1)
 
 	mailboxSelectedStyle = lipgloss.NewStyle().
-				Foreground(colorNeonCyan).
-				Background(colorBgSelect).
+				Foreground(mbColorPrimary).
+				Background(mbColorBgSelect).
 				Bold(true).
-				PaddingLeft(1).
-				BorderStyle(lipgloss.NormalBorder()).
-				BorderLeft(true).
-				BorderForeground(colorNeonCyan)
+				PaddingLeft(1)
 
 	mailboxUnreadStyle = lipgloss.NewStyle().
-				Foreground(colorNeonPink).
-				Bold(true)
+				Foreground(mbColorPrimary)
 
 	mailboxIconStyle = lipgloss.NewStyle().
-				Foreground(colorTextMuted)
+				Foreground(mbColorDim)
 
 	mailboxIconActiveStyle = lipgloss.NewStyle().
-				Foreground(colorNeonCyan)
+				Foreground(mbColorPrimary)
 )
 
 // MailboxView displays the mailbox list
@@ -119,8 +112,8 @@ func (v *MailboxView) SetSize(width, height int) {
 func (v *MailboxView) View() string {
 	var b strings.Builder
 
-	// Title with decorative elements
-	title := mailboxTitleStyle.Render("◈ MAILBOXES")
+	// Title
+	title := mailboxTitleStyle.Render("◈ mailboxes")
 	b.WriteString(title)
 	b.WriteString("\n")
 
@@ -145,7 +138,7 @@ func (v *MailboxView) View() string {
 	// Render custom mailboxes if any
 	if len(custom) > 0 {
 		b.WriteString("\n")
-		labelTitle := mailboxTitleStyle.Render("◈ LABELS")
+		labelTitle := mailboxTitleStyle.Render("◈ labels")
 		b.WriteString(labelTitle)
 		b.WriteString("\n")
 

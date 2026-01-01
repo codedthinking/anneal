@@ -5,7 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/koren/tuimail/internal/models"
+	"github.com/the9x/anneal/internal/models"
 	"github.com/zalando/go-keyring"
 	"gopkg.in/yaml.v3"
 )

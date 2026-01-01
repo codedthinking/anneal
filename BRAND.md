@@ -140,10 +140,10 @@ No gradients in text. No bright success colors.
 
 ## Screens & Layout
 
-- Single primary pane
 - Fixed header with tool name
+- Optional sidebar for folder navigation
+- Primary content pane (messages/email)
 - Optional status line (right-aligned)
-- No sidebars
 - No badges
 
 ---

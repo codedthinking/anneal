@@ -9,10 +9,10 @@ import (
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/koren/tuimail/internal/config"
-	"github.com/koren/tuimail/internal/jmap"
-	"github.com/koren/tuimail/internal/models"
-	"github.com/koren/tuimail/internal/ui/views"
+	"github.com/the9x/anneal/internal/config"
+	"github.com/the9x/anneal/internal/jmap"
+	"github.com/the9x/anneal/internal/models"
+	"github.com/the9x/anneal/internal/ui/views"
 )
 
 // ViewState represents the navigation depth
@@ -431,7 +431,12 @@ func (a *App) handleMessagesKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				if a.selectedThread >= len(a.threads)-1 && a.selectedThread > 0 {
 					a.selectedThread--
 				}
-				return a, a.archiveEmail(thread.Emails[0].ID)
+				// Archive all emails in the thread
+				emailIDs := make([]string, len(thread.Emails))
+				for i, e := range thread.Emails {
+					emailIDs[i] = e.ID
+				}
+				return a, a.archiveThread(emailIDs)
 			}
 		}
 	}
@@ -468,15 +473,20 @@ func (a *App) handleThreadKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		thread.Expanded = false
 		a.viewState = ViewMessages
 	case key.Matches(msg, a.keys.Archive):
-		// Archive selected email in thread, go back to messages
-		if a.selectedInThread < len(thread.Emails) {
+		// Archive entire thread, go back to messages
+		if len(thread.Emails) > 0 {
 			thread.Expanded = false
 			a.viewState = ViewMessages
 			// Adjust selection if at end
 			if a.selectedThread >= len(a.threads)-1 && a.selectedThread > 0 {
 				a.selectedThread--
 			}
-			return a, a.archiveEmail(thread.Emails[a.selectedInThread].ID)
+			// Archive all emails in the thread
+			emailIDs := make([]string, len(thread.Emails))
+			for i, e := range thread.Emails {
+				emailIDs[i] = e.ID
+			}
+			return a, a.archiveThread(emailIDs)
 		}
 	case key.Matches(msg, a.keys.Delete):
 		// Delete selected email in thread, go back to messages
@@ -523,15 +533,20 @@ func (a *App) handleEmailKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return a, a.deleteEmail(emailID)
 		}
 	case key.Matches(msg, a.keys.Archive):
-		if a.currentEmail != nil {
-			emailID := a.currentEmail.ID
+		if a.selectedThread < len(a.threads) {
+			thread := a.threads[a.selectedThread]
 			a.currentEmail = nil
 			a.viewState = ViewMessages
 			// Adjust selection if at end
 			if a.selectedThread >= len(a.threads)-1 && a.selectedThread > 0 {
 				a.selectedThread--
 			}
-			return a, a.archiveEmail(emailID)
+			// Archive all emails in the thread
+			emailIDs := make([]string, len(thread.Emails))
+			for i, e := range thread.Emails {
+				emailIDs[i] = e.ID
+			}
+			return a, a.archiveThread(emailIDs)
 		}
 	}
 	return a, nil
@@ -566,7 +581,7 @@ func (a *App) toggleUnread(email models.Email) tea.Cmd {
 	}
 }
 
-func (a *App) archiveEmail(emailID string) tea.Cmd {
+func (a *App) archiveThread(emailIDs []string) tea.Cmd {
 	return func() tea.Msg {
 		var archiveID string
 		for _, mb := range a.mailboxes {
@@ -578,15 +593,20 @@ func (a *App) archiveEmail(emailID string) tea.Cmd {
 		if archiveID == "" {
 			return emailActionMsg{err: fmt.Errorf("archive mailbox not found")}
 		}
-		err := a.client.MoveEmail(emailID, "", archiveID)
-		return emailActionMsg{err: err}
+		// Archive all emails in the thread
+		for _, emailID := range emailIDs {
+			if err := a.client.MoveEmail(emailID, "", archiveID); err != nil {
+				return emailActionMsg{err: err}
+			}
+		}
+		return emailActionMsg{err: nil}
 	}
 }
 
 // View renders the application
 func (a *App) View() string {
 	if a.width == 0 {
-		return LoadingStyle.Render("  ▓▒░ INITIALIZING ░▒▓")
+		return LoadingStyle.Render("  ◇ initializing...")
 	}
 
 	header := a.renderHeader()
@@ -611,15 +631,7 @@ func (a *App) View() string {
 }
 
 func (a *App) renderHeader() string {
-	logo := LogoStyle.Render("▀█▀ █ █ █ █▀▄▀█ ▄▀█ █ █   ")
-	logo2 := HeaderTitleStyle.Render(" █  █▄█ █ █ ▀ █ █▀█ █ █▄▄ ")
-
-	var titleBlock string
-	if a.width > 60 {
-		titleBlock = lipgloss.JoinVertical(lipgloss.Left, logo, logo2)
-	} else {
-		titleBlock = LogoStyle.Render("◈ TUIMAIL")
-	}
+	titleBlock := LogoStyle.Render("◈ anneal")
 
 	accountLabel := StatusDescStyle.Render("▸ ")
 	account := HeaderAccountStyle.Render(a.client.Email())
@@ -629,13 +641,13 @@ func (a *App) renderHeader() string {
 	var modeIndicator string
 	switch a.viewState {
 	case ViewFolders:
-		modeIndicator = StatusModeStyle.Render(" FOLDERS ")
+		modeIndicator = StatusModeStyle.Render(" folders ")
 	case ViewMessages:
-		modeIndicator = StatusModeStyle.Render(" MESSAGES ")
+		modeIndicator = StatusModeStyle.Render(" messages ")
 	case ViewThread:
-		modeIndicator = StatusModeStyle.Render(" THREAD ")
+		modeIndicator = StatusModeStyle.Render(" thread ")
 	case ViewEmail:
-		modeIndicator = StatusModeStyle.Render(" EMAIL ")
+		modeIndicator = StatusModeStyle.Render(" email ")
 	}
 
 	titleWidth := lipgloss.Width(titleBlock)
@@ -718,8 +730,8 @@ func (a *App) renderHelp() string {
 	}
 
 	return lipgloss.NewStyle().
-		Foreground(ColorTextMuted).
-		Background(ColorBgMid).
+		Foreground(ColorDim).
+		Background(ColorBg).
 		Padding(0, 2).
 		Width(a.width).
 		Render(helpText)
@@ -728,9 +740,9 @@ func (a *App) renderHelp() string {
 func (a *App) renderContent() string {
 	if a.err != nil {
 		errBox := lipgloss.JoinVertical(lipgloss.Center,
-			ErrorStyle.Render("▓▒░ ERROR ░▒▓"),
+			ErrorStyle.Render("◇ something went wrong"),
 			"",
-			lipgloss.NewStyle().Foreground(ColorError).Render(fmt.Sprintf("%v", a.err)),
+			lipgloss.NewStyle().Foreground(ColorSecondary).Render(fmt.Sprintf("%v", a.err)),
 		)
 		return lipgloss.Place(a.width, 10, lipgloss.Center, lipgloss.Center, errBox)
 	}
@@ -739,7 +751,7 @@ func (a *App) renderContent() string {
 		loadingBox := lipgloss.JoinVertical(lipgloss.Center,
 			SpinnerStyle.Render(a.spinner.View()),
 			"",
-			LoadingStyle.Render("▓▒░ CONNECTING ░▒▓"),
+			LoadingStyle.Render("connecting..."),
 		)
 		return lipgloss.Place(a.width, 10, lipgloss.Center, lipgloss.Center, loadingBox)
 	}
@@ -807,15 +819,14 @@ func (a *App) renderThreadContents(width int) string {
 
 	// Thread header
 	headerStyle := lipgloss.NewStyle().
-		Foreground(ColorNeonCyan).
-		Bold(true).
+		Foreground(ColorPrimary).
 		MarginBottom(1)
 
 	b.WriteString(headerStyle.Render("◈ " + thread.Subject))
 	b.WriteString("\n")
 
 	countStyle := lipgloss.NewStyle().
-		Foreground(ColorTextMuted)
+		Foreground(ColorDim)
 	b.WriteString(countStyle.Render(fmt.Sprintf("  %d messages in thread", len(thread.Emails))))
 	b.WriteString("\n\n")
 
@@ -831,19 +842,19 @@ func (a *App) renderThreadContents(width int) string {
 		// Selection indicator
 		if isSelected {
 			b.WriteString(lipgloss.NewStyle().
-				Foreground(ColorNeonCyan).
+				Foreground(ColorPrimary).
 				Render(indent[:len(indent)-2] + "▶ "))
 		} else {
 			b.WriteString(indent)
 		}
 
 		// Email info
-		fromStyle := lipgloss.NewStyle().Foreground(ColorTextNormal)
+		fromStyle := lipgloss.NewStyle().Foreground(ColorSecondary)
 		if email.IsUnread {
-			fromStyle = lipgloss.NewStyle().Foreground(ColorNeonCyan).Bold(true)
+			fromStyle = lipgloss.NewStyle().Foreground(ColorPrimary)
 		}
 
-		dateStyle := lipgloss.NewStyle().Foreground(ColorTextMuted)
+		dateStyle := lipgloss.NewStyle().Foreground(ColorDim)
 
 		line := fromStyle.Render(email.FromDisplay()) +
 			"  " +
@@ -865,7 +876,7 @@ func (a *App) renderThreadContents(width int) string {
 				preview = preview[:57] + "..."
 			}
 			previewStyle := lipgloss.NewStyle().
-				Foreground(ColorTextMuted).
+				Foreground(ColorDim).
 				PaddingLeft(len(indent))
 			b.WriteString(previewStyle.Render(preview))
 			b.WriteString("\n")
@@ -895,8 +906,7 @@ func (a *App) renderStatusBar() string {
 
 		if mb.UnreadCount > 0 {
 			unread := lipgloss.NewStyle().
-				Foreground(ColorNeonPink).
-				Bold(true).
+				Foreground(ColorPrimary).
 				Render(fmt.Sprintf(" ● %d unread", mb.UnreadCount))
 			leftPart += unread
 		}
@@ -906,21 +916,21 @@ func (a *App) renderStatusBar() string {
 	breadcrumb := ""
 	switch a.viewState {
 	case ViewFolders:
-		breadcrumb = StatusKeyStyle.Render("FOLDERS")
+		breadcrumb = StatusKeyStyle.Render("folders")
 	case ViewMessages:
 		breadcrumb = StatusDescStyle.Render("folders ") +
-			StatusKeyStyle.Render("→ MESSAGES")
+			StatusKeyStyle.Render("→ messages")
 	case ViewThread:
 		breadcrumb = StatusDescStyle.Render("folders → messages ") +
-			StatusKeyStyle.Render("→ THREAD")
+			StatusKeyStyle.Render("→ thread")
 	case ViewEmail:
 		// Check if we came from a thread or directly from messages
 		if a.selectedThread < len(a.threads) && len(a.threads[a.selectedThread].Emails) > 1 {
 			breadcrumb = StatusDescStyle.Render("... → thread ") +
-				StatusKeyStyle.Render("→ EMAIL")
+				StatusKeyStyle.Render("→ email")
 		} else {
 			breadcrumb = StatusDescStyle.Render("... → messages ") +
-				StatusKeyStyle.Render("→ EMAIL")
+				StatusKeyStyle.Render("→ email")
 		}
 	}
 	rightPart = breadcrumb

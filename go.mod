@@ -1,4 +1,4 @@
-module github.com/koren/tuimail
+module github.com/the9x/anneal
 
 go 1.25.5
 

@@ -7,76 +7,52 @@ import (
 
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/koren/tuimail/internal/models"
+	"github.com/the9x/anneal/internal/models"
 )
 
 const maxEmailWidth = 80
 
-// Cyberpunk styles for email reader
+// anneal brand colors
 var (
-	readerColorNeonCyan   = lipgloss.Color("#00FFFF")
-	readerColorNeonPink   = lipgloss.Color("#FF2E97")
-	readerColorNeonPurple = lipgloss.Color("#BD00FF")
-	readerColorTextBright = lipgloss.Color("#EAEAEA")
-	readerColorTextNormal = lipgloss.Color("#B8B8B8")
-	readerColorTextMuted  = lipgloss.Color("#5C5C7A")
-	readerColorTextDim    = lipgloss.Color("#3D3D5C")
-	readerColorBgLight    = lipgloss.Color("#16213E")
+	readerColorPrimary   = lipgloss.Color("#d4d2e3")
+	readerColorSecondary = lipgloss.Color("#9795b5")
+	readerColorDim       = lipgloss.Color("#5a5880")
+	readerColorBg        = lipgloss.Color("#1d1d40")
 
 	readerHeaderStyle = lipgloss.NewStyle().
-				Background(readerColorBgLight).
-				BorderStyle(lipgloss.Border{
-			Top:         "─",
-			Bottom:      "─",
-			Left:        "│",
-			Right:       "│",
-			TopLeft:     "╭",
-			TopRight:    "╮",
-			BottomLeft:  "╰",
-			BottomRight: "╯",
-		}).
-		BorderForeground(readerColorTextDim).
-		Padding(1, 2)
+				Background(readerColorBg).
+				Padding(1, 0)
 
 	readerLabelStyle = lipgloss.NewStyle().
-				Foreground(readerColorNeonPurple).
-				Bold(true).
-				Width(10)
+				Foreground(readerColorDim).
+				Width(8)
 
 	readerValueStyle = lipgloss.NewStyle().
-				Foreground(readerColorTextBright)
+				Foreground(readerColorPrimary)
 
 	readerSubjectStyle = lipgloss.NewStyle().
-				Foreground(readerColorNeonCyan).
-				Bold(true).
+				Foreground(readerColorPrimary).
 				MarginTop(1).
 				MarginBottom(1)
 
 	readerBodyStyle = lipgloss.NewStyle().
-			Foreground(readerColorTextNormal)
+			Foreground(readerColorPrimary)
 
 	readerAttachmentStyle = lipgloss.NewStyle().
-				Foreground(readerColorTextMuted).
+				Foreground(readerColorDim).
 				MarginTop(1).
-				BorderStyle(lipgloss.NormalBorder()).
-				BorderTop(true).
-				BorderForeground(readerColorTextDim).
 				PaddingTop(1)
 
 	readerAttachmentItemStyle = lipgloss.NewStyle().
-					Foreground(readerColorTextMuted)
+					Foreground(readerColorDim)
 
 	readerScrollStyle = lipgloss.NewStyle().
-				Foreground(readerColorNeonPink).
-				Align(lipgloss.Right).
-				Bold(true)
+				Foreground(readerColorDim).
+				Align(lipgloss.Right)
 
 	readerQuoteStyle = lipgloss.NewStyle().
-				Foreground(readerColorTextMuted).
-				PaddingLeft(2).
-				BorderStyle(lipgloss.NormalBorder()).
-				BorderLeft(true).
-				BorderForeground(readerColorTextDim)
+				Foreground(readerColorSecondary).
+				PaddingLeft(2)
 )
 
 // EmailReaderView displays a single email
@@ -165,15 +141,19 @@ func (v *EmailReaderView) prepareContent() {
 		}
 	}
 
-	// Collapse multiple empty lines (more than 1) into single empty line
+	// Normalize whitespace-only lines to empty, then collapse
+	body = regexp.MustCompile(`(?m)^[ \t]+$`).ReplaceAllString(body, "")
 	body = regexp.MustCompile(`\n{3,}`).ReplaceAllString(body, "\n\n")
 	body = strings.TrimSpace(body)
 
 	// Wrap text to content width
 	v.lines = v.wrapText(body, v.contentWidth-4)
 
-	// Remove consecutive empty lines from the result
+	// Remove consecutive empty/whitespace lines from the result
 	v.lines = v.collapseEmptyLines(v.lines)
+
+	// Trim leading/trailing empty lines
+	v.lines = v.trimEmptyLines(v.lines)
 }
 
 // collapseEmptyLines removes consecutive empty lines, keeping only one
@@ -181,14 +161,52 @@ func (v *EmailReaderView) collapseEmptyLines(lines []string) []string {
 	var result []string
 	prevEmpty := false
 	for _, line := range lines {
-		isEmpty := strings.TrimSpace(line) == ""
+		// Strip ANSI codes for empty check
+		stripped := regexp.MustCompile(`\x1b\[[0-9;]*m`).ReplaceAllString(line, "")
+		isEmpty := strings.TrimSpace(stripped) == ""
 		if isEmpty && prevEmpty {
 			continue // Skip consecutive empty lines
 		}
-		result = append(result, line)
+		if isEmpty {
+			result = append(result, "") // Normalize to truly empty
+		} else {
+			result = append(result, line)
+		}
 		prevEmpty = isEmpty
 	}
 	return result
+}
+
+// trimEmptyLines removes leading and trailing empty lines
+func (v *EmailReaderView) trimEmptyLines(lines []string) []string {
+	if len(lines) == 0 {
+		return lines
+	}
+
+	// Find first non-empty
+	start := 0
+	for start < len(lines) {
+		stripped := regexp.MustCompile(`\x1b\[[0-9;]*m`).ReplaceAllString(lines[start], "")
+		if strings.TrimSpace(stripped) != "" {
+			break
+		}
+		start++
+	}
+
+	// Find last non-empty
+	end := len(lines) - 1
+	for end >= start {
+		stripped := regexp.MustCompile(`\x1b\[[0-9;]*m`).ReplaceAllString(lines[end], "")
+		if strings.TrimSpace(stripped) != "" {
+			break
+		}
+		end--
+	}
+
+	if start > end {
+		return []string{}
+	}
+	return lines[start : end+1]
 }
 
 // looksLikeMarkdown checks if text appears to be markdown
@@ -215,7 +233,7 @@ func (v *EmailReaderView) looksLikeMarkdown(text string) bool {
 func (v *EmailReaderView) View() string {
 	if v.email == nil {
 		return lipgloss.NewStyle().
-			Foreground(readerColorTextMuted).
+			Foreground(readerColorDim).
 			Render("◇ No email selected")
 	}
 
@@ -317,7 +335,7 @@ func (v *EmailReaderView) renderHeader() string {
 	if len(v.email.CC) > 0 {
 		cc := v.formatAddresses(v.email.CC)
 		lines = append(lines,
-			readerLabelStyle.Render("▸ CC")+
+			readerLabelStyle.Render("▸ cc")+
 				readerValueStyle.Render(cc))
 	}
 
@@ -344,9 +362,9 @@ func (v *EmailReaderView) formatAddresses(addrs []models.EmailAddress) string {
 
 func (v *EmailReaderView) renderAttachments() string {
 	title := lipgloss.NewStyle().
-		Foreground(readerColorNeonPurple).
+		Foreground(readerColorSecondary).
 		Bold(true).
-		Render("◈ ATTACHMENTS")
+		Render("◈ attachments")
 
 	var items []string
 	for _, att := range v.email.Attachments {

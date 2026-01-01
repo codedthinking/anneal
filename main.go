@@ -7,9 +7,9 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/koren/tuimail/internal/config"
-	"github.com/koren/tuimail/internal/jmap"
-	"github.com/koren/tuimail/internal/ui"
+	"github.com/the9x/anneal/internal/config"
+	"github.com/the9x/anneal/internal/jmap"
+	"github.com/the9x/anneal/internal/ui"
 )
 
 func main() {

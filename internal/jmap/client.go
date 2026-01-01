@@ -7,7 +7,7 @@ import (
 	"git.sr.ht/~rockorager/go-jmap/mail"
 	"git.sr.ht/~rockorager/go-jmap/mail/email"
 	"git.sr.ht/~rockorager/go-jmap/mail/mailbox"
-	"github.com/koren/tuimail/internal/models"
+	"github.com/the9x/anneal/internal/models"
 )
 
 // Client wraps the JMAP client for Fastmail
