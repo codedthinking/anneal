@@ -1,8 +1,15 @@
-# TuiMail - TUI Email Client for Fastmail
+# anneal — Implementation Plan
+
+*email triage under noise*
+by the9x.ac
 
 ## Overview
 
-A terminal-based email client built with Go and Bubble Tea, connecting to Fastmail via JMAP protocol. Features email management, multi-account support, contacts, and calendar access.
+**anneal** is a personal, terminal-first email client designed to reduce inbox load without demanding completion. It reframes email as a noisy optimization problem and rewards local, irreversible progress rather than inbox zero.
+
+- **Mental model:** simulated annealing for email
+- **Promise:** steady reduction under uncertainty, no guilt
+- **Backend:** Fastmail via JMAP (opinionated by design)
 
 ## Technology Stack
 
@@ -20,12 +27,13 @@ A terminal-based email client built with Go and Bubble Tea, connecting to Fastma
 ## Architecture
 
 ```
-tuimail/
+anneal/
 ├── main.go                 # Entry point
 ├── go.mod
 ├── go.sum
 ├── config.yaml.example
 ├── Makefile
+├── BRAND.md                # Brand guidelines
 │
 ├── internal/
 │   ├── config/             # Configuration loading
@@ -52,13 +60,14 @@ tuimail/
 │   │
 │   └── ui/                 # Bubble Tea UI
 │       ├── app.go          # Root model, view routing
-│       ├── styles.go       # Lip Gloss styles
+│       ├── styles.go       # Lip Gloss styles (the9x.ac palette)
 │       ├── keys.go         # Key bindings
 │       │
 │       ├── views/
 │       │   ├── mailbox.go      # Folder list sidebar
+│       │   ├── threadlist.go   # Thread/message list view
 │       │   ├── emaillist.go    # Email list view
-│       │   ├── emailview.go    # Read email view
+│       │   ├── emailreader.go  # Read email view
 │       │   ├── compose.go      # Compose/reply view
 │       │   ├── contacts.go     # Contacts list
 │       │   ├── calendar.go     # Calendar view
@@ -74,15 +83,35 @@ tuimail/
     └── keybindings.md
 ```
 
+## Brand-Aligned UX Principles
+
+1. **Session-scoped success** — success is defined per session, never globally
+2. **Directional feedback** — show deltas (−11), not totals
+3. **No red states** — no failure indicators, ever
+4. **Irreversibility** — actions feel final and satisfying
+5. **Silence by default** — minimal chrome, minimal copy
+
+## Visual Identity
+
+anneal inherits **the9x.ac** colors:
+
+| Role | Color | Usage |
+|------|-------|-------|
+| Background | `#1d1d40` | App background |
+| Primary | `#d4d2e3` | Main text, selected items |
+| Secondary | `#9795b5` | Subjects, quotes, muted text |
+| Dim | `#5a5880` | Headers, dates, hints |
+| Accent | `#e61e25` | Flags only (used sparingly) |
+
 ## Core Features
 
-### Phase 1: Email Core (MVP)
+### Phase 1: Email Core (MVP) ✓
 1. **Authentication** - API token storage in system keyring
 2. **Session Management** - JMAP session initialization
 3. **Mailbox List** - Display folders with unread counts
 4. **Email List** - Paginated email list with threading
 5. **Email Viewer** - Read emails with plain text/HTML rendering
-6. **Basic Actions** - Mark read/unread, archive, delete, move
+6. **Basic Actions** - Mark read/unread, archive (full thread), delete
 
 ### Phase 2: Compose & Reply
 1. **Compose** - New email with $EDITOR integration
@@ -103,7 +132,7 @@ tuimail/
 
 ### Phase 5: Polish
 1. **Search** - JMAP search with filters
-2. **Keyboard Shortcuts** - Vim-style navigation
+2. **Session Metrics** - Show deltas during session (−11 handled)
 3. **Themes** - Configurable color schemes
 4. **Notifications** - New mail notifications
 
@@ -111,47 +140,44 @@ tuimail/
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│ TuiMail                              work@example.com  [?] Help │
+│ ◈ anneal                           work@example.com    messages │
 ├───────────────┬─────────────────────────────────────────────────┤
-│ MAILBOXES     │ INBOX (847)                          Search: /  │
+│ ◈ mailboxes   │ from              subject                  date │
 │               ├─────────────────────────────────────────────────┤
-│ ▶ Inbox    12 │ ● John Doe         Project Update      10:30 AM │
-│   Drafts    2 │   Jane Smith       Re: Meeting notes   09:15 AM │
-│   Sent        │   GitHub       ●   [notifications] ... Yesterday│
-│   Archive     │   Alice Wong       Quarterly report    Yesterday│
-│   Trash       │ ▶ Bob Miller       Design feedback     Nov 28   │
-│               │   Newsletter       Weekly digest       Nov 27   │
-│ LABELS        │                                                 │
-│   Work        │                                                 │
-│   Personal    │                                                 │
-│   Finance     │                                                 │
+│   ▶ inbox  12 │ ● john doe        project update       10:30 am │
+│     drafts  2 │   jane smith      re: meeting notes    09:15 am │
+│     sent      │   github      ●   [notifications] ... yesterday │
+│     archive   │   alice wong      quarterly report     yesterday │
+│     trash     │ ▶3 bob miller     design feedback        nov 28 │
+│               │   newsletter      weekly digest          nov 27 │
+│ ◈ labels      │                                                 │
+│     work      │                                                 │
+│     personal  │                                                 │
 │               │                                                 │
 ├───────────────┴─────────────────────────────────────────────────┤
-│ j/k: navigate  Enter: open  c: compose  r: reply  d: delete     │
+│ j/k: navigate  enter: open  a: archive  d: delete  ?: help      │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-## Key Bindings (Vim-inspired)
+## Key Bindings
 
 | Key | Action |
 |-----|--------|
 | `←/h` | Navigate back (folder/list/thread) |
-| `→/l` | Navigate forward / open |
+| `→/l/Enter` | Navigate forward / open |
 | `↑/k` | Navigate up in list |
 | `↓/j` | Navigate down in list |
 | `g/G` | Go to top/bottom |
-| `Enter` | Open / expand thread |
 | `Esc/q` | Back |
-| `Space/Tab` | Expand/collapse thread |
 | `c` | Compose new email |
 | `r` | Reply |
 | `R` | Reply all |
 | `f` | Forward |
 | `d` | Delete |
-| `a` | Archive |
+| `a` | Archive (entire thread) |
 | `m` | Move to folder |
 | `s` | Star/flag |
-| `u` | Mark unread |
+| `u` | Toggle read/unread |
 | `/` | Search |
 | `1-5` | Switch account |
 | `?` | Help |
@@ -160,94 +186,21 @@ tuimail/
 ## Configuration
 
 ```yaml
-# ~/.config/tuimail/config.yaml
+# ~/.config/anneal/config.yaml
 accounts:
-  - name: Work
+  - name: work
     email: work@example.com
     # Token stored in system keyring
     default: true
 
-  - name: Personal
+  - name: personal
     email: personal@fastmail.com
 
-theme: dark  # dark, light, nord, dracula
 editor: $EDITOR  # or vim, nvim, etc.
 preview_pane: true
 threading: true
 page_size: 50
 ```
-
-## Implementation Steps
-
-### Step 1: Project Setup
-- Initialize Go module
-- Set up directory structure
-- Add dependencies (bubble tea, lip gloss, go-jmap)
-- Create Makefile
-
-### Step 2: JMAP Client
-- Implement session initialization
-- Mailbox fetching
-- Email list fetching with pagination
-- Email content fetching
-
-### Step 3: Basic TUI
-- Root app model with view state
-- Mailbox sidebar component
-- Email list component
-- Navigation between views
-
-### Step 4: Email Viewer
-- Plain text rendering
-- Basic HTML to text conversion
-- Header display
-- Attachment listing
-
-### Step 5: Actions
-- Mark read/unread
-- Delete/archive
-- Move between mailboxes
-
-### Step 6: Compose
-- External editor integration
-- Reply with quoting
-- Send via JMAP EmailSubmission
-
-### Step 7: Multi-Account
-- Config file parsing
-- Keyring integration
-- Account switcher UI
-
-### Step 8: Contacts/Calendar
-- CardDAV client
-- CalDAV client
-- UI integration
-
-## Dependencies
-
-```go
-require (
-    github.com/charmbracelet/bubbletea
-    github.com/charmbracelet/bubbles
-    github.com/charmbracelet/lipgloss
-    git.sr.ht/~rockorager/go-jmap
-    github.com/zalando/go-keyring
-    gopkg.in/yaml.v3
-    github.com/emersion/go-webdav  // CardDAV/CalDAV
-)
-```
-
-## Success Criteria
-
-- [x] Can authenticate with Fastmail API token
-- [x] Can view mailboxes and emails
-- [x] Can read email content (with markdown rendering)
-- [ ] Can compose and send emails
-- [ ] Can switch between multiple accounts
-- [ ] Can view contacts
-- [ ] Can view calendar events
-- [x] Smooth, responsive TUI experience
-- [x] Vim-style keyboard navigation
 
 ## Implementation Progress
 
@@ -261,16 +214,32 @@ require (
 - [x] HTML → Markdown conversion
 - [x] Glamour markdown rendering
 - [x] Mark read/unread, archive, delete actions
-- [x] Cyberpunk/Blade Runner aesthetic
+- [x] Archive operates on entire thread
+- [x] the9x.ac brand colors and aesthetic
 - [x] Arrow key navigation (←/→ between panes)
 - [x] Breadcrumb navigation indicator
+- [x] Lowercase, minimal UI copy
 
 ### In Progress
-- [ ] Compose with $EDITOR integration
+- [ ] Session metrics (show deltas: −11 handled)
 
 ### Not Started
+- [ ] Compose with $EDITOR integration
 - [ ] Reply/Forward functionality
 - [ ] Multi-account switching
 - [ ] CardDAV contacts
 - [ ] CalDAV calendar
 - [ ] Full-text search
+
+## Success Criteria
+
+- [x] Can authenticate with Fastmail API token
+- [x] Can view mailboxes and emails
+- [x] Can read email content (with markdown rendering)
+- [ ] Can compose and send emails
+- [ ] Can switch between multiple accounts
+- [ ] Can view contacts
+- [ ] Can view calendar events
+- [x] Smooth, responsive TUI experience
+- [x] Vim-style keyboard navigation
+- [x] Brand-aligned calm, minimal aesthetic
