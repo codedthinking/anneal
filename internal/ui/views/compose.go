@@ -324,7 +324,7 @@ func (v *ComposeView) Update(msg tea.Msg) (*ComposeView, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		// Handle From field identity selection
+		// Handle From field - Tab cycles through identities
 		if v.focused == FieldFrom && len(v.identities) > 1 {
 			switch msg.String() {
 			case "left", "h":
@@ -333,11 +333,15 @@ func (v *ComposeView) Update(msg tea.Msg) (*ComposeView, tea.Cmd) {
 					v.selectedIdentity = len(v.identities) - 1
 				}
 				return v, nil
-			case "right", "l", "enter":
+			case "right", "l", "tab", "enter":
 				v.selectedIdentity++
 				if v.selectedIdentity >= len(v.identities) {
 					v.selectedIdentity = 0
 				}
+				return v, nil
+			case "down":
+				// Move to next field
+				v.focusField(FieldTo)
 				return v, nil
 			}
 		}
@@ -454,10 +458,10 @@ func (v *ComposeView) View() string {
 	b.WriteString(v.body.View())
 	b.WriteString("\n")
 
-	// Help - add arrows hint if on From field
+	// Help - add tab hint if on From field
 	helpText := "tab: next field │ ctrl+s: send │ esc: cancel"
 	if v.focused == FieldFrom {
-		helpText = "←/→: change identity │ tab: next field │ ctrl+s: send │ esc: cancel"
+		helpText = "tab/←/→: cycle identity │ ↓: next field │ ctrl+s: send │ esc: cancel"
 	}
 	help := composeHelpStyle.Render(helpText)
 	b.WriteString(help)
@@ -511,4 +515,14 @@ func (v *ComposeView) GetIdentity() *Identity {
 		return &v.identities[v.selectedIdentity]
 	}
 	return nil
+}
+
+// SelectIdentityByEmail selects the identity matching the given email
+func (v *ComposeView) SelectIdentityByEmail(email string) {
+	for i, id := range v.identities {
+		if strings.EqualFold(id.Email, email) {
+			v.selectedIdentity = i
+			return
+		}
+	}
 }

@@ -894,11 +894,29 @@ func (a *App) startCompose(email *models.Email, mode views.ComposeMode) (tea.Mod
 	case views.ModeReply:
 		a.composeView.SetReply(email, false)
 		a.composeView.RemoveSelfFromCC(a.client.Email())
+		// Select identity that received the email
+		if email != nil {
+			for _, to := range email.To {
+				a.composeView.SelectIdentityByEmail(to.Email)
+			}
+		}
 	case views.ModeReplyAll:
 		a.composeView.SetReply(email, true)
 		a.composeView.RemoveSelfFromCC(a.client.Email())
+		// Select identity that received the email
+		if email != nil {
+			for _, to := range email.To {
+				a.composeView.SelectIdentityByEmail(to.Email)
+			}
+		}
 	case views.ModeForward:
 		a.composeView.SetForward(email)
+		// Select identity that received the email
+		if email != nil {
+			for _, to := range email.To {
+				a.composeView.SelectIdentityByEmail(to.Email)
+			}
+		}
 	}
 
 	a.prevViewState = a.viewState
