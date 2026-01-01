@@ -2,6 +2,9 @@ package jmap
 
 import (
 	"fmt"
+	"io"
+	"net/http"
+	"strings"
 
 	"git.sr.ht/~rockorager/go-jmap"
 	"git.sr.ht/~rockorager/go-jmap/mail"
@@ -12,9 +15,10 @@ import (
 
 // Client wraps the JMAP client for Fastmail
 type Client struct {
-	client    *jmap.Client
-	accountID jmap.ID
-	email     string
+	client      *jmap.Client
+	accountID   jmap.ID
+	email       string
+	accessToken string
 }
 
 // New creates a new JMAP client for Fastmail
@@ -36,9 +40,10 @@ func New(emailAddr, token string) (*Client, error) {
 	}
 
 	return &Client{
-		client:    client,
-		accountID: accountID,
-		email:     emailAddr,
+		client:      client,
+		accountID:   accountID,
+		email:       emailAddr,
+		accessToken: token,
 	}, nil
 }
 
@@ -317,4 +322,289 @@ func (c *Client) AccountID() string {
 // Email returns the email address for this client
 func (c *Client) Email() string {
 	return c.email
+}
+
+// DownloadURL returns the download URL for a blob
+func (c *Client) DownloadURL(blobID, filename string) string {
+	url := c.client.Session.DownloadURL
+	url = strings.ReplaceAll(url, "{accountId}", string(c.accountID))
+	url = strings.ReplaceAll(url, "{blobId}", blobID)
+	url = strings.ReplaceAll(url, "{name}", filename)
+	url = strings.ReplaceAll(url, "{type}", "application/octet-stream")
+	return url
+}
+
+// DownloadBlob downloads a blob and returns its contents
+func (c *Client) DownloadBlob(blobID, filename string) ([]byte, error) {
+	url := c.DownloadURL(blobID, filename)
+
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	// Add authorization header (same as JMAP client uses)
+	req.Header.Set("Authorization", "Bearer "+c.accessToken)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to download: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("download failed with status: %d", resp.StatusCode)
+	}
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	return data, nil
+}
+
+// ChangesResult holds the result of a JMAP changes call
+type ChangesResult struct {
+	OldState  string
+	NewState  string
+	Created   []string
+	Updated   []string
+	Destroyed []string
+	HasMore   bool
+}
+
+// MailboxesWithState fetches all mailboxes and returns the state token
+func (c *Client) MailboxesWithState() ([]models.Mailbox, string, error) {
+	req := &jmap.Request{}
+	req.Invoke(&mailbox.Get{
+		Account: c.accountID,
+	})
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to get mailboxes: %w", err)
+	}
+
+	var mailboxes []models.Mailbox
+	var state string
+	for _, inv := range resp.Responses {
+		if getResp, ok := inv.Args.(*mailbox.GetResponse); ok {
+			state = getResp.State
+			for _, mb := range getResp.List {
+				mailboxes = append(mailboxes, models.Mailbox{
+					ID:          string(mb.ID),
+					Name:        mb.Name,
+					Role:        string(mb.Role),
+					ParentID:    string(mb.ParentID),
+					TotalEmails: int(mb.TotalEmails),
+					UnreadCount: int(mb.UnreadEmails),
+					SortOrder:   int(mb.SortOrder),
+				})
+			}
+		}
+	}
+
+	return mailboxes, state, nil
+}
+
+// GetMailboxChanges gets changes since the given state token
+func (c *Client) GetMailboxChanges(sinceState string) (*ChangesResult, error) {
+	req := &jmap.Request{}
+	req.Invoke(&mailbox.Changes{
+		Account:    c.accountID,
+		SinceState: sinceState,
+	})
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get mailbox changes: %w", err)
+	}
+
+	for _, inv := range resp.Responses {
+		if changesResp, ok := inv.Args.(*mailbox.ChangesResponse); ok {
+			result := &ChangesResult{
+				OldState: changesResp.OldState,
+				NewState: changesResp.NewState,
+				HasMore:  changesResp.HasMoreChanges,
+			}
+			for _, id := range changesResp.Created {
+				result.Created = append(result.Created, string(id))
+			}
+			for _, id := range changesResp.Updated {
+				result.Updated = append(result.Updated, string(id))
+			}
+			for _, id := range changesResp.Destroyed {
+				result.Destroyed = append(result.Destroyed, string(id))
+			}
+			return result, nil
+		}
+	}
+
+	return nil, fmt.Errorf("no changes response received")
+}
+
+// GetMailboxesByIDs fetches specific mailboxes by ID
+func (c *Client) GetMailboxesByIDs(ids []string) ([]models.Mailbox, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+
+	req := &jmap.Request{}
+	jmapIDs := make([]jmap.ID, len(ids))
+	for i, id := range ids {
+		jmapIDs[i] = jmap.ID(id)
+	}
+
+	req.Invoke(&mailbox.Get{
+		Account: c.accountID,
+		IDs:     jmapIDs,
+	})
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get mailboxes: %w", err)
+	}
+
+	var mailboxes []models.Mailbox
+	for _, inv := range resp.Responses {
+		if getResp, ok := inv.Args.(*mailbox.GetResponse); ok {
+			for _, mb := range getResp.List {
+				mailboxes = append(mailboxes, models.Mailbox{
+					ID:          string(mb.ID),
+					Name:        mb.Name,
+					Role:        string(mb.Role),
+					ParentID:    string(mb.ParentID),
+					TotalEmails: int(mb.TotalEmails),
+					UnreadCount: int(mb.UnreadEmails),
+					SortOrder:   int(mb.SortOrder),
+				})
+			}
+		}
+	}
+
+	return mailboxes, nil
+}
+
+// EmailsWithState fetches emails from a mailbox and returns the state token
+func (c *Client) EmailsWithState(mailboxID string, limit int) ([]models.Email, string, error) {
+	req := &jmap.Request{}
+
+	queryCall := req.Invoke(&email.Query{
+		Account: c.accountID,
+		Filter: &email.FilterCondition{
+			InMailbox: jmap.ID(mailboxID),
+		},
+		Sort: []*email.SortComparator{
+			{Property: "receivedAt", IsAscending: false},
+		},
+		Limit: uint64(limit),
+	})
+
+	req.Invoke(&email.Get{
+		Account: c.accountID,
+		ReferenceIDs: &jmap.ResultReference{
+			ResultOf: queryCall,
+			Name:     "Email/query",
+			Path:     "/ids",
+		},
+		Properties: []string{
+			"id", "threadId", "mailboxIds", "from", "to", "cc", "bcc",
+			"replyTo", "subject", "preview", "receivedAt", "size",
+			"keywords", "hasAttachment",
+		},
+	})
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to get emails: %w", err)
+	}
+
+	var emails []models.Email
+	var state string
+	for _, inv := range resp.Responses {
+		if getResp, ok := inv.Args.(*email.GetResponse); ok {
+			state = getResp.State
+			for _, e := range getResp.List {
+				emails = append(emails, convertEmail(e))
+			}
+		}
+	}
+
+	return emails, state, nil
+}
+
+// GetEmailChanges gets email changes since the given state token
+func (c *Client) GetEmailChanges(sinceState string) (*ChangesResult, error) {
+	req := &jmap.Request{}
+	req.Invoke(&email.Changes{
+		Account:    c.accountID,
+		SinceState: sinceState,
+	})
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get email changes: %w", err)
+	}
+
+	for _, inv := range resp.Responses {
+		if changesResp, ok := inv.Args.(*email.ChangesResponse); ok {
+			result := &ChangesResult{
+				OldState: changesResp.OldState,
+				NewState: changesResp.NewState,
+				HasMore:  changesResp.HasMoreChanges,
+			}
+			for _, id := range changesResp.Created {
+				result.Created = append(result.Created, string(id))
+			}
+			for _, id := range changesResp.Updated {
+				result.Updated = append(result.Updated, string(id))
+			}
+			for _, id := range changesResp.Destroyed {
+				result.Destroyed = append(result.Destroyed, string(id))
+			}
+			return result, nil
+		}
+	}
+
+	return nil, fmt.Errorf("no changes response received")
+}
+
+// GetEmailsByIDs fetches specific emails by ID (metadata only)
+func (c *Client) GetEmailsByIDs(ids []string) ([]models.Email, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+
+	req := &jmap.Request{}
+	jmapIDs := make([]jmap.ID, len(ids))
+	for i, id := range ids {
+		jmapIDs[i] = jmap.ID(id)
+	}
+
+	req.Invoke(&email.Get{
+		Account: c.accountID,
+		IDs:     jmapIDs,
+		Properties: []string{
+			"id", "threadId", "mailboxIds", "from", "to", "cc", "bcc",
+			"replyTo", "subject", "preview", "receivedAt", "size",
+			"keywords", "hasAttachment",
+		},
+	})
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get emails: %w", err)
+	}
+
+	var emails []models.Email
+	for _, inv := range resp.Responses {
+		if getResp, ok := inv.Args.(*email.GetResponse); ok {
+			for _, e := range getResp.List {
+				emails = append(emails, convertEmail(e))
+			}
+		}
+	}
+
+	return emails, nil
 }

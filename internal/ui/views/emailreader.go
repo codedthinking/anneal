@@ -10,7 +10,7 @@ import (
 	"github.com/the9x/anneal/internal/models"
 )
 
-const maxEmailWidth = 80
+const maxEmailWidth = 100
 
 // anneal brand colors
 var (
@@ -46,6 +46,10 @@ var (
 	readerAttachmentItemStyle = lipgloss.NewStyle().
 					Foreground(readerColorDim)
 
+	readerAttachmentSelectedStyle = lipgloss.NewStyle().
+					Foreground(readerColorPrimary).
+					Bold(true)
+
 	readerScrollStyle = lipgloss.NewStyle().
 				Foreground(readerColorDim).
 				Align(lipgloss.Right)
@@ -57,13 +61,15 @@ var (
 
 // EmailReaderView displays a single email
 type EmailReaderView struct {
-	email       *models.Email
-	width       int
-	height      int
-	contentWidth int
-	scrollY     int
-	lines       []string
-	renderer    *glamour.TermRenderer
+	email              *models.Email
+	width              int
+	height             int
+	contentWidth       int
+	scrollY            int
+	lines              []string
+	renderer           *glamour.TermRenderer
+	attachmentMode     bool // true when navigating attachments
+	selectedAttachment int  // index of selected attachment
 }
 
 // NewEmailReaderView creates a new email reader view
@@ -123,6 +129,85 @@ func (v *EmailReaderView) ScrollDown() {
 	}
 }
 
+// HasAttachments returns true if the email has non-inline attachments
+func (v *EmailReaderView) HasAttachments() bool {
+	if v.email == nil {
+		return false
+	}
+	for _, att := range v.email.Attachments {
+		if !att.IsInline {
+			return true
+		}
+	}
+	return false
+}
+
+// ToggleAttachmentMode toggles attachment selection mode
+func (v *EmailReaderView) ToggleAttachmentMode() {
+	if !v.HasAttachments() {
+		return
+	}
+	v.attachmentMode = !v.attachmentMode
+	if v.attachmentMode {
+		v.selectedAttachment = 0
+	}
+}
+
+// InAttachmentMode returns true if in attachment selection mode
+func (v *EmailReaderView) InAttachmentMode() bool {
+	return v.attachmentMode
+}
+
+// NextAttachment selects the next attachment
+func (v *EmailReaderView) NextAttachment() {
+	if !v.attachmentMode || v.email == nil {
+		return
+	}
+	count := v.nonInlineAttachmentCount()
+	if v.selectedAttachment < count-1 {
+		v.selectedAttachment++
+	}
+}
+
+// PrevAttachment selects the previous attachment
+func (v *EmailReaderView) PrevAttachment() {
+	if !v.attachmentMode {
+		return
+	}
+	if v.selectedAttachment > 0 {
+		v.selectedAttachment--
+	}
+}
+
+// SelectedAttachment returns the currently selected attachment, or nil
+func (v *EmailReaderView) SelectedAttachment() *models.Attachment {
+	if !v.attachmentMode || v.email == nil {
+		return nil
+	}
+	idx := 0
+	for i := range v.email.Attachments {
+		if v.email.Attachments[i].IsInline {
+			continue
+		}
+		if idx == v.selectedAttachment {
+			return &v.email.Attachments[i]
+		}
+		idx++
+	}
+	return nil
+}
+
+// nonInlineAttachmentCount returns the count of non-inline attachments
+func (v *EmailReaderView) nonInlineAttachmentCount() int {
+	count := 0
+	for _, att := range v.email.Attachments {
+		if !att.IsInline {
+			count++
+		}
+	}
+	return count
+}
+
 func (v *EmailReaderView) prepareContent() {
 	// Get body content
 	body := v.email.TextBody
@@ -145,6 +230,9 @@ func (v *EmailReaderView) prepareContent() {
 	body = regexp.MustCompile(`(?m)^[ \t]+$`).ReplaceAllString(body, "")
 	body = regexp.MustCompile(`\n{3,}`).ReplaceAllString(body, "\n\n")
 	body = strings.TrimSpace(body)
+
+	// Reflow text: unwrap hard-wrapped lines into paragraphs
+	body = v.reflowText(body)
 
 	// Wrap text to content width
 	v.lines = v.wrapText(body, v.contentWidth-4)
@@ -361,20 +449,31 @@ func (v *EmailReaderView) formatAddresses(addrs []models.EmailAddress) string {
 }
 
 func (v *EmailReaderView) renderAttachments() string {
+	titleText := "◈ attachments"
+	if v.attachmentMode {
+		titleText = "◈ attachments (o: open, esc: back)"
+	}
 	title := lipgloss.NewStyle().
 		Foreground(readerColorSecondary).
 		Bold(true).
-		Render("◈ attachments")
+		Render(titleText)
 
 	var items []string
+	idx := 0
 	for _, att := range v.email.Attachments {
 		if att.IsInline {
 			continue
 		}
 		size := v.formatSize(att.Size)
-		item := readerAttachmentItemStyle.Render(
-			fmt.Sprintf("  ◇ %s (%s)", att.Name, size))
-		items = append(items, item)
+		text := fmt.Sprintf("  ◇ %s (%s)", att.Name, size)
+
+		if v.attachmentMode && idx == v.selectedAttachment {
+			text = fmt.Sprintf("  ▶ %s (%s)", att.Name, size)
+			items = append(items, readerAttachmentSelectedStyle.Render(text))
+		} else {
+			items = append(items, readerAttachmentItemStyle.Render(text))
+		}
+		idx++
 	}
 
 	if len(items) == 0 {
@@ -398,6 +497,65 @@ func (v *EmailReaderView) formatSize(bytes int) string {
 	default:
 		return fmt.Sprintf("%d B", bytes)
 	}
+}
+
+// reflowText unwraps hard-wrapped lines into proper paragraphs
+// while preserving quoted lines, lists, and other structural elements
+func (v *EmailReaderView) reflowText(text string) string {
+	lines := strings.Split(text, "\n")
+	var result []string
+	var currentPara []string
+
+	flushPara := func() {
+		if len(currentPara) > 0 {
+			result = append(result, strings.Join(currentPara, " "))
+			currentPara = nil
+		}
+	}
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+
+		// Empty line = paragraph break
+		if trimmed == "" {
+			flushPara()
+			result = append(result, "")
+			continue
+		}
+
+		// Preserve these line types as-is (don't join with previous)
+		isSpecial := false
+
+		// Quoted lines (email replies)
+		if strings.HasPrefix(trimmed, ">") {
+			isSpecial = true
+		}
+		// List items
+		if strings.HasPrefix(trimmed, "- ") || strings.HasPrefix(trimmed, "* ") ||
+			regexp.MustCompile(`^\d+\.\s`).MatchString(trimmed) {
+			isSpecial = true
+		}
+		// Headers
+		if strings.HasPrefix(trimmed, "#") {
+			isSpecial = true
+		}
+		// Signature delimiter
+		if trimmed == "--" || trimmed == "-- " {
+			isSpecial = true
+		}
+
+		if isSpecial {
+			flushPara()
+			result = append(result, line)
+			continue
+		}
+
+		// Regular text line - accumulate into paragraph
+		currentPara = append(currentPara, trimmed)
+	}
+
+	flushPara()
+	return strings.Join(result, "\n")
 }
 
 func (v *EmailReaderView) wrapText(text string, width int) []string {

@@ -74,7 +74,16 @@ var (
 				Align(lipgloss.Center)
 )
 
-const maxListWidth = 80
+const maxListWidth = 100
+
+// Column width constraints
+const (
+	dateWidth     = 10 // Fixed: "Dec 31" or "12:34 PM"
+	countWidth    = 4  // Fixed: "▶99" or " ● "
+	minFromWidth  = 12
+	maxFromWidth  = 24
+	minSubjWidth  = 20
+)
 
 // ThreadListView displays a list of threads
 type ThreadListView struct {
@@ -132,6 +141,34 @@ func (v *ThreadListView) SetSize(width, height int) {
 	}
 }
 
+// calculateColumnWidths returns responsive from and subject widths
+func (v *ThreadListView) calculateColumnWidths() (fromWidth, subjectWidth int) {
+	// Fixed columns: date (10) + count (4) + spacing (4) = 18
+	fixedWidth := dateWidth + countWidth + 4
+	flexibleWidth := v.contentWidth - fixedWidth
+
+	if flexibleWidth < minFromWidth+minSubjWidth {
+		// Terminal too narrow, use minimums
+		return minFromWidth, minSubjWidth
+	}
+
+	// Allocate flexible space: 25% to from, 75% to subject
+	fromWidth = flexibleWidth / 4
+	if fromWidth < minFromWidth {
+		fromWidth = minFromWidth
+	}
+	if fromWidth > maxFromWidth {
+		fromWidth = maxFromWidth
+	}
+
+	subjectWidth = flexibleWidth - fromWidth
+	if subjectWidth < minSubjWidth {
+		subjectWidth = minSubjWidth
+	}
+
+	return fromWidth, subjectWidth
+}
+
 // View renders the thread list
 func (v *ThreadListView) View() string {
 	if len(v.threads) == 0 {
@@ -141,19 +178,13 @@ func (v *ThreadListView) View() string {
 
 	var b strings.Builder
 
-	// Calculate column widths based on contentWidth (capped at maxListWidth)
-	fromWidth := 18
-	dateWidth := 8
-	countWidth := 3
-	subjectWidth := v.contentWidth - fromWidth - dateWidth - countWidth - 8
-	if subjectWidth < 10 {
-		subjectWidth = 10
-	}
+	// Calculate responsive column widths
+	fromW, subjectW := v.calculateColumnWidths()
 
 	// Render header
 	header := fmt.Sprintf("    %-*s %-*s %*s",
-		fromWidth, "from",
-		subjectWidth, "subject",
+		fromW, "from",
+		subjectW, "subject",
 		dateWidth, "date")
 	if len(header) > v.contentWidth {
 		header = header[:v.contentWidth]
@@ -177,7 +208,7 @@ func (v *ThreadListView) View() string {
 		thread := v.threads[i]
 		isSelected := i == v.selected
 
-		b.WriteString(v.renderThreadRow(thread, isSelected, fromWidth, subjectWidth, dateWidth))
+		b.WriteString(v.renderThreadRow(thread, isSelected, fromW, subjectW))
 		if i < endIdx-1 {
 			b.WriteString("\n")
 		}
@@ -202,7 +233,7 @@ func (v *ThreadListView) View() string {
 	return content
 }
 
-func (v *ThreadListView) renderThreadRow(thread Thread, selected bool, fromWidth, subjectWidth, dateWidth int) string {
+func (v *ThreadListView) renderThreadRow(thread Thread, selected bool, fromWidth, subjectWidth int) string {
 	// Build plain text first, then style
 
 	// Unread indicator (1 char)
@@ -211,13 +242,13 @@ func (v *ThreadListView) renderThreadRow(thread Thread, selected bool, fromWidth
 		unreadDot = "●"
 	}
 
-	// Thread/email indicator (3 chars max)
-	countStr := "   "
+	// Thread/email indicator (countWidth chars)
+	countStr := fmt.Sprintf("%*s", countWidth, "")
 	if thread.EmailCnt > 1 {
 		if thread.Expanded {
-			countStr = fmt.Sprintf("▼%-2d", thread.EmailCnt)
+			countStr = fmt.Sprintf("▼%-*d", countWidth-1, thread.EmailCnt)
 		} else {
-			countStr = fmt.Sprintf("▶%-2d", thread.EmailCnt)
+			countStr = fmt.Sprintf("▶%-*d", countWidth-1, thread.EmailCnt)
 		}
 	}
 
@@ -238,7 +269,7 @@ func (v *ThreadListView) renderThreadRow(thread Thread, selected bool, fromWidth
 	}
 	subject = fmt.Sprintf("%-*s", subjectWidth, subject)
 
-	// Date - right align
+	// Date - right align (use constant dateWidth)
 	date := fmt.Sprintf("%*s", dateWidth, thread.Date)
 
 	// Build the row as plain text

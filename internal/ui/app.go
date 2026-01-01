@@ -2,6 +2,9 @@ package ui
 
 import (
 	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/help"
@@ -12,6 +15,7 @@ import (
 	"github.com/the9x/anneal/internal/config"
 	"github.com/the9x/anneal/internal/jmap"
 	"github.com/the9x/anneal/internal/models"
+	"github.com/the9x/anneal/internal/storage"
 	"github.com/the9x/anneal/internal/ui/views"
 )
 
@@ -25,6 +29,7 @@ const (
 	ViewMessages                  // Message list: threads (multi-email) and standalone emails
 	ViewThread                    // Inside a multi-email thread, selecting which email
 	ViewEmail                     // Reading single email
+	ViewCompose                   // Composing/replying to email
 )
 
 // Thread represents a group of emails in a conversation
@@ -43,6 +48,8 @@ type Thread struct {
 type App struct {
 	cfg       *config.Config
 	client    *jmap.Client
+	store     *storage.Store
+	syncer    *storage.Syncer
 	keys      KeyMap
 	help      help.Model
 	spinner   spinner.Model
@@ -50,6 +57,7 @@ type App struct {
 	height    int
 	viewState ViewState
 	loading   bool
+	syncing   bool // Background sync in progress
 	err       error
 
 	// Data
@@ -65,17 +73,28 @@ type App struct {
 	mailboxView *views.MailboxView
 	threadList  *views.ThreadListView
 	emailReader *views.EmailReaderView
+	composeView *views.ComposeView
+
+	// State for compose
+	prevViewState ViewState // Where to return after compose
 }
 
 // NewApp creates a new application instance
-func NewApp(cfg *config.Config, client *jmap.Client) *App {
+func NewApp(cfg *config.Config, client *jmap.Client, store *storage.Store) *App {
 	s := spinner.New()
 	s.Spinner = spinner.Dot
 	s.Style = SpinnerStyle
 
+	var syncer *storage.Syncer
+	if store != nil {
+		syncer = storage.NewSyncer(store, client)
+	}
+
 	return &App{
 		cfg:       cfg,
 		client:    client,
+		store:     store,
+		syncer:    syncer,
 		keys:      DefaultKeyMap(),
 		help:      help.New(),
 		spinner:   s,
@@ -88,46 +107,133 @@ func NewApp(cfg *config.Config, client *jmap.Client) *App {
 func (a *App) Init() tea.Cmd {
 	return tea.Batch(
 		a.spinner.Tick,
-		a.loadMailboxes,
+		a.loadMailboxesCacheFirst,
 	)
 }
 
 // Msg types for async operations
 type mailboxesLoadedMsg struct {
-	mailboxes []models.Mailbox
-	err       error
+	mailboxes  []models.Mailbox
+	fromCache  bool
+	err        error
 }
 
 type emailsLoadedMsg struct {
-	emails []models.Email
-	err    error
+	emails    []models.Email
+	fromCache bool
+	err       error
 }
 
 type emailLoadedMsg struct {
-	email *models.Email
-	err   error
+	email     *models.Email
+	fromCache bool
+	err       error
+}
+
+type syncCompleteMsg struct {
+	mailboxResult *storage.SyncResult
+	emailResult   *storage.SyncResult
+	err           error
 }
 
 type emailActionMsg struct {
 	err error
 }
 
+type emailSentMsg struct {
+	err error
+}
+
+type attachmentOpenedMsg struct {
+	err error
+}
+
+// loadMailboxesCacheFirst tries cache first, then falls back to network
+func (a *App) loadMailboxesCacheFirst() tea.Msg {
+	// Try cache first if syncer is available
+	if a.syncer != nil {
+		mailboxes, err := a.syncer.GetCachedMailboxes()
+		if err == nil && len(mailboxes) > 0 {
+			return mailboxesLoadedMsg{mailboxes: mailboxes, fromCache: true, err: nil}
+		}
+	}
+
+	// Fall back to network
+	mailboxes, err := a.client.GetMailboxes()
+	return mailboxesLoadedMsg{mailboxes: mailboxes, fromCache: false, err: err}
+}
+
 func (a *App) loadMailboxes() tea.Msg {
 	mailboxes, err := a.client.GetMailboxes()
-	return mailboxesLoadedMsg{mailboxes: mailboxes, err: err}
+	return mailboxesLoadedMsg{mailboxes: mailboxes, fromCache: false, err: err}
 }
 
 func (a *App) loadEmails(mailboxID string) tea.Cmd {
 	return func() tea.Msg {
+		// Try cache first
+		if a.syncer != nil {
+			emails, err := a.syncer.GetCachedEmails(mailboxID, a.cfg.PageSize)
+			if err == nil && len(emails) > 0 {
+				return emailsLoadedMsg{emails: emails, fromCache: true, err: nil}
+			}
+		}
+
+		// Fall back to network
 		emails, err := a.client.GetEmails(mailboxID, a.cfg.PageSize)
-		return emailsLoadedMsg{emails: emails, err: err}
+
+		// Cache the results
+		if err == nil && a.syncer != nil && len(emails) > 0 {
+			a.store.SaveEmails(a.client.AccountID(), emails)
+		}
+
+		return emailsLoadedMsg{emails: emails, fromCache: false, err: err}
 	}
 }
 
 func (a *App) loadEmail(emailID string) tea.Cmd {
 	return func() tea.Msg {
+		// Try cache first (for full body)
+		if a.syncer != nil {
+			email, err := a.syncer.GetCachedEmailBody(emailID)
+			if err == nil && email != nil && (email.TextBody != "" || email.HTMLBody != "") {
+				return emailLoadedMsg{email: email, fromCache: true, err: nil}
+			}
+		}
+
+		// Fall back to network
 		email, err := a.client.GetEmail(emailID)
-		return emailLoadedMsg{email: email, err: err}
+
+		// Cache the body
+		if err == nil && email != nil && a.store != nil {
+			a.store.SaveEmailBody(email)
+		}
+
+		return emailLoadedMsg{email: email, fromCache: false, err: err}
+	}
+}
+
+// syncInBackground triggers a background sync
+func (a *App) syncInBackground(mailboxID string) tea.Cmd {
+	return func() tea.Msg {
+		if a.syncer == nil {
+			return syncCompleteMsg{err: nil}
+		}
+
+		mailboxResult, err := a.syncer.SyncMailboxes()
+		if err != nil {
+			return syncCompleteMsg{err: err}
+		}
+
+		var emailResult *storage.SyncResult
+		if mailboxID != "" {
+			emailResult, err = a.syncer.SyncEmails(mailboxID, 100)
+		}
+
+		return syncCompleteMsg{
+			mailboxResult: mailboxResult,
+			emailResult:   emailResult,
+			err:           err,
+		}
 	}
 }
 
@@ -235,18 +341,36 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.mailboxes = msg.mailboxes
 		a.mailboxView = views.NewMailboxView(a.mailboxes)
 
+		// Cache mailboxes if from network
+		if !msg.fromCache && a.store != nil {
+			a.store.SaveMailboxes(a.client.AccountID(), a.mailboxes)
+		}
+
 		// Find inbox and load emails
+		var inboxID string
 		for i, mb := range a.mailboxes {
 			if mb.Role == "inbox" {
 				a.selectedMailbox = i
 				a.mailboxView.Select(i)
-				a.loading = true
-				return a, a.loadEmails(mb.ID)
+				inboxID = mb.ID
+				break
 			}
 		}
-		if len(a.mailboxes) > 0 {
+		if inboxID == "" && len(a.mailboxes) > 0 {
+			inboxID = a.mailboxes[0].ID
+		}
+
+		if inboxID != "" {
 			a.loading = true
-			return a, a.loadEmails(a.mailboxes[0].ID)
+			cmds := []tea.Cmd{a.loadEmails(inboxID)}
+
+			// Trigger background sync if loaded from cache
+			if msg.fromCache {
+				a.syncing = true
+				cmds = append(cmds, a.syncInBackground(inboxID))
+			}
+
+			return a, tea.Batch(cmds...)
 		}
 		return a, nil
 
@@ -307,6 +431,82 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, a.loadEmails(a.mailboxes[a.selectedMailbox].ID)
 		}
 		return a, nil
+
+	case emailSentMsg:
+		if msg.err != nil {
+			a.err = msg.err
+		}
+		// Refresh to show sent email in sent folder if viewing it
+		if len(a.mailboxes) > 0 && a.selectedMailbox < len(a.mailboxes) {
+			return a, a.loadEmails(a.mailboxes[a.selectedMailbox].ID)
+		}
+		return a, nil
+
+	case attachmentOpenedMsg:
+		if msg.err != nil {
+			a.err = msg.err
+		}
+		// Exit attachment mode after opening
+		if a.emailReader != nil && a.emailReader.InAttachmentMode() {
+			a.emailReader.ToggleAttachmentMode()
+		}
+		return a, nil
+
+	case syncCompleteMsg:
+		a.syncing = false
+		if msg.err != nil {
+			// Sync errors are non-fatal, just log them
+			return a, nil
+		}
+
+		// If there were changes, refresh the data
+		hasChanges := false
+		if msg.mailboxResult != nil {
+			hasChanges = msg.mailboxResult.MailboxesCreated > 0 ||
+				msg.mailboxResult.MailboxesUpdated > 0 ||
+				msg.mailboxResult.MailboxesDestroyed > 0
+		}
+		if msg.emailResult != nil {
+			hasChanges = hasChanges ||
+				msg.emailResult.EmailsCreated > 0 ||
+				msg.emailResult.EmailsUpdated > 0 ||
+				msg.emailResult.EmailsDestroyed > 0
+		}
+
+		if hasChanges {
+			// Reload from cache (which now has synced data)
+			var cmds []tea.Cmd
+
+			// Reload mailboxes if they changed
+			if msg.mailboxResult != nil &&
+				(msg.mailboxResult.MailboxesCreated > 0 ||
+					msg.mailboxResult.MailboxesUpdated > 0 ||
+					msg.mailboxResult.MailboxesDestroyed > 0) {
+				cmds = append(cmds, func() tea.Msg {
+					mailboxes, err := a.syncer.GetCachedMailboxes()
+					return mailboxesLoadedMsg{mailboxes: mailboxes, fromCache: true, err: err}
+				})
+			}
+
+			// Reload emails if they changed
+			if msg.emailResult != nil &&
+				(msg.emailResult.EmailsCreated > 0 ||
+					msg.emailResult.EmailsUpdated > 0 ||
+					msg.emailResult.EmailsDestroyed > 0) {
+				if len(a.mailboxes) > 0 && a.selectedMailbox < len(a.mailboxes) {
+					mailboxID := a.mailboxes[a.selectedMailbox].ID
+					cmds = append(cmds, func() tea.Msg {
+						emails, err := a.syncer.GetCachedEmails(mailboxID, a.cfg.PageSize)
+						return emailsLoadedMsg{emails: emails, fromCache: true, err: err}
+					})
+				}
+			}
+
+			if len(cmds) > 0 {
+				return a, tea.Batch(cmds...)
+			}
+		}
+		return a, nil
 	}
 
 	return a, tea.Batch(cmds...)
@@ -323,6 +523,8 @@ func (a *App) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return a.handleThreadKeys(msg)
 	case ViewEmail:
 		return a.handleEmailKeys(msg)
+	case ViewCompose:
+		return a.handleComposeKeys(msg)
 	}
 	return a, nil
 }
@@ -439,6 +641,29 @@ func (a *App) handleMessagesKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return a, a.archiveThread(emailIDs)
 			}
 		}
+	case key.Matches(msg, a.keys.Compose):
+		return a.startCompose(nil, views.ModeCompose)
+	case key.Matches(msg, a.keys.Reply):
+		if len(a.threads) > 0 && a.selectedThread < len(a.threads) {
+			thread := a.threads[a.selectedThread]
+			if len(thread.Emails) > 0 {
+				return a.startCompose(&thread.Emails[0], views.ModeReply)
+			}
+		}
+	case key.Matches(msg, a.keys.ReplyAll):
+		if len(a.threads) > 0 && a.selectedThread < len(a.threads) {
+			thread := a.threads[a.selectedThread]
+			if len(thread.Emails) > 0 {
+				return a.startCompose(&thread.Emails[0], views.ModeReplyAll)
+			}
+		}
+	case key.Matches(msg, a.keys.Forward):
+		if len(a.threads) > 0 && a.selectedThread < len(a.threads) {
+			thread := a.threads[a.selectedThread]
+			if len(thread.Emails) > 0 {
+				return a.startCompose(&thread.Emails[0], views.ModeForward)
+			}
+		}
 	}
 	return a, nil
 }
@@ -503,6 +728,11 @@ func (a *App) handleThreadKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (a *App) handleEmailKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Handle attachment mode separately
+	if a.emailReader != nil && a.emailReader.InAttachmentMode() {
+		return a.handleAttachmentKeys(msg)
+	}
+
 	switch {
 	case key.Matches(msg, a.keys.Up):
 		if a.emailReader != nil {
@@ -548,8 +778,105 @@ func (a *App) handleEmailKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			return a, a.archiveThread(emailIDs)
 		}
+	case key.Matches(msg, a.keys.Compose):
+		return a.startCompose(nil, views.ModeCompose)
+	case key.Matches(msg, a.keys.Reply):
+		if a.currentEmail != nil {
+			return a.startCompose(a.currentEmail, views.ModeReply)
+		}
+	case key.Matches(msg, a.keys.ReplyAll):
+		if a.currentEmail != nil {
+			return a.startCompose(a.currentEmail, views.ModeReplyAll)
+		}
+	case key.Matches(msg, a.keys.Forward):
+		if a.currentEmail != nil {
+			return a.startCompose(a.currentEmail, views.ModeForward)
+		}
+	case key.Matches(msg, a.keys.Right), key.Matches(msg, a.keys.Enter):
+		// Navigate forward to attachments if email has any
+		if a.emailReader != nil && a.emailReader.HasAttachments() {
+			a.emailReader.ToggleAttachmentMode()
+		}
 	}
 	return a, nil
+}
+
+func (a *App) handleAttachmentKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch {
+	case key.Matches(msg, a.keys.Up):
+		a.emailReader.PrevAttachment()
+	case key.Matches(msg, a.keys.Down):
+		a.emailReader.NextAttachment()
+	case key.Matches(msg, a.keys.Left), key.Matches(msg, a.keys.Back):
+		// Go back to email
+		a.emailReader.ToggleAttachmentMode()
+	case key.Matches(msg, a.keys.Right), key.Matches(msg, a.keys.Enter):
+		// Open selected attachment
+		att := a.emailReader.SelectedAttachment()
+		if att != nil {
+			return a, a.openAttachment(att)
+		}
+	}
+	return a, nil
+}
+
+// startCompose initializes the compose view
+func (a *App) startCompose(email *models.Email, mode views.ComposeMode) (tea.Model, tea.Cmd) {
+	a.composeView = views.NewComposeView(a.width-26, a.height-8)
+
+	switch mode {
+	case views.ModeReply:
+		a.composeView.SetReply(email, false)
+		a.composeView.RemoveSelfFromCC(a.client.Email())
+	case views.ModeReplyAll:
+		a.composeView.SetReply(email, true)
+		a.composeView.RemoveSelfFromCC(a.client.Email())
+	case views.ModeForward:
+		a.composeView.SetForward(email)
+	}
+
+	a.prevViewState = a.viewState
+	a.viewState = ViewCompose
+
+	return a, nil
+}
+
+// handleComposeKeys handles input in compose view
+func (a *App) handleComposeKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		// Cancel compose
+		a.viewState = a.prevViewState
+		a.composeView = nil
+		return a, nil
+	case "ctrl+s":
+		// Send email
+		if a.composeView == nil {
+			return a, nil
+		}
+
+		// Validate
+		if !a.composeView.HasRecipients() {
+			return a, nil
+		}
+		if a.composeView.IsEmpty() {
+			return a, nil
+		}
+
+		to, cc, subject, body := a.composeView.GetValues()
+		original := a.composeView.Original
+
+		// Return to previous view
+		a.viewState = a.prevViewState
+		a.composeView = nil
+
+		return a, a.sendEmail(to, cc, subject, body, original)
+	}
+
+	// Pass to compose view
+	var cmd tea.Cmd
+	a.composeView, cmd = a.composeView.Update(msg)
+	return a, cmd
 }
 
 func (a *App) deleteEmail(emailID string) tea.Cmd {
@@ -603,6 +930,51 @@ func (a *App) archiveThread(emailIDs []string) tea.Cmd {
 	}
 }
 
+func (a *App) openAttachment(att *models.Attachment) tea.Cmd {
+	return func() tea.Msg {
+		// Create cache directory
+		cacheDir := filepath.Join(os.TempDir(), "anneal", "attachments")
+		if err := os.MkdirAll(cacheDir, 0755); err != nil {
+			return attachmentOpenedMsg{err: fmt.Errorf("failed to create cache dir: %w", err)}
+		}
+
+		// Download blob
+		data, err := a.client.DownloadBlob(att.BlobID, att.Name)
+		if err != nil {
+			return attachmentOpenedMsg{err: err}
+		}
+
+		// Save to temp file
+		filePath := filepath.Join(cacheDir, fmt.Sprintf("%s-%s", att.BlobID, att.Name))
+		if err := os.WriteFile(filePath, data, 0644); err != nil {
+			return attachmentOpenedMsg{err: fmt.Errorf("failed to save file: %w", err)}
+		}
+
+		// Open with system default (non-blocking)
+		cmd := exec.Command("open", filePath)
+		if err := cmd.Start(); err != nil {
+			return attachmentOpenedMsg{err: fmt.Errorf("failed to open file: %w", err)}
+		}
+
+		return attachmentOpenedMsg{err: nil}
+	}
+}
+
+func (a *App) sendEmail(to, cc []string, subject, body string, original *models.Email) tea.Cmd {
+	return func() tea.Msg {
+		var inReplyTo, references []string
+
+		// Set reply headers if this is a reply
+		if original != nil {
+			inReplyTo = []string{original.ID}
+			// Could add references chain here if needed
+		}
+
+		err := a.client.SendEmail(to, cc, subject, body, inReplyTo, references)
+		return emailSentMsg{err: err}
+	}
+}
+
 // View renders the application
 func (a *App) View() string {
 	if a.width == 0 {
@@ -648,6 +1020,8 @@ func (a *App) renderHeader() string {
 		modeIndicator = StatusModeStyle.Render(" thread ")
 	case ViewEmail:
 		modeIndicator = StatusModeStyle.Render(" email ")
+	case ViewCompose:
+		modeIndicator = StatusModeStyle.Render(" compose ")
 	}
 
 	titleWidth := lipgloss.Width(titleBlock)
@@ -691,7 +1065,8 @@ func (a *App) renderHelp() string {
 			{"↑/↓", "select"},
 			{"→/enter", "open"},
 			{"←/esc", "folders"},
-			{"space", "expand"},
+			{"c", "compose"},
+			{"r", "reply"},
 			{"a", "archive"},
 			{"?", "help"},
 		}
@@ -704,12 +1079,32 @@ func (a *App) renderHelp() string {
 			{"?", "help"},
 		}
 	case ViewEmail:
+		if a.emailReader != nil && a.emailReader.InAttachmentMode() {
+			keys = []struct{ key, desc string }{
+				{"↑/↓", "select"},
+				{"→/enter", "open"},
+				{"←/esc", "email"},
+			}
+		} else {
+			keys = []struct{ key, desc string }{
+				{"↑/↓", "scroll"},
+				{"←/esc", "back"},
+				{"r", "reply"},
+				{"R", "reply all"},
+				{"f", "forward"},
+				{"a", "archive"},
+			}
+			// Show attachments hint if email has attachments
+			if a.emailReader != nil && a.emailReader.HasAttachments() {
+				keys = append(keys, struct{ key, desc string }{"→", "attachments"})
+			}
+			keys = append(keys, struct{ key, desc string }{"?", "help"})
+		}
+	case ViewCompose:
 		keys = []struct{ key, desc string }{
-			{"↑/↓", "scroll"},
-			{"←/esc", "back"},
-			{"a", "archive"},
-			{"d", "delete"},
-			{"?", "help"},
+			{"tab", "next field"},
+			{"ctrl+s", "send"},
+			{"esc", "cancel"},
 		}
 	}
 
@@ -772,6 +1167,8 @@ func (a *App) renderContent() string {
 		main = a.renderThreadContents(mainWidth)
 	case ViewEmail:
 		main = a.renderEmailReader(mainWidth)
+	case ViewCompose:
+		main = a.renderComposeView(mainWidth)
 	}
 
 	return lipgloss.JoinHorizontal(lipgloss.Top, sidebar, main)
@@ -894,6 +1291,14 @@ func (a *App) renderEmailReader(width int) string {
 	return a.emailReader.View()
 }
 
+func (a *App) renderComposeView(width int) string {
+	if a.composeView == nil {
+		return a.renderEmptyMain(width, "No compose view")
+	}
+	a.composeView.SetSize(width, a.height-8)
+	return a.composeView.View()
+}
+
 func (a *App) renderStatusBar() string {
 	var leftPart, rightPart string
 
@@ -924,14 +1329,20 @@ func (a *App) renderStatusBar() string {
 		breadcrumb = StatusDescStyle.Render("folders → messages ") +
 			StatusKeyStyle.Render("→ thread")
 	case ViewEmail:
-		// Check if we came from a thread or directly from messages
-		if a.selectedThread < len(a.threads) && len(a.threads[a.selectedThread].Emails) > 1 {
+		// Check if in attachment mode
+		if a.emailReader != nil && a.emailReader.InAttachmentMode() {
+			breadcrumb = StatusDescStyle.Render("... → email ") +
+				StatusKeyStyle.Render("→ attachments")
+		} else if a.selectedThread < len(a.threads) && len(a.threads[a.selectedThread].Emails) > 1 {
 			breadcrumb = StatusDescStyle.Render("... → thread ") +
 				StatusKeyStyle.Render("→ email")
 		} else {
 			breadcrumb = StatusDescStyle.Render("... → messages ") +
 				StatusKeyStyle.Render("→ email")
 		}
+	case ViewCompose:
+		breadcrumb = StatusDescStyle.Render("... ") +
+			StatusKeyStyle.Render("→ compose")
 	}
 	rightPart = breadcrumb
 

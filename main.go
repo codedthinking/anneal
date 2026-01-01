@@ -9,6 +9,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/the9x/anneal/internal/config"
 	"github.com/the9x/anneal/internal/jmap"
+	"github.com/the9x/anneal/internal/storage"
 	"github.com/the9x/anneal/internal/ui"
 )
 
@@ -50,8 +51,20 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Create local storage (non-fatal if fails)
+	store, err := storage.New()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: local cache unavailable: %v\n", err)
+		store = nil
+	}
+	defer func() {
+		if store != nil {
+			store.Close()
+		}
+	}()
+
 	// Create and run the app
-	app := ui.NewApp(cfg, client)
+	app := ui.NewApp(cfg, client, store)
 	p := tea.NewProgram(app, tea.WithAltScreen())
 
 	if _, err := p.Run(); err != nil {
