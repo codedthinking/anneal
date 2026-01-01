@@ -190,6 +190,20 @@ func (a *App) loadEmails(mailboxID string) tea.Cmd {
 	}
 }
 
+// loadEmailsFresh always fetches from network, skipping cache
+func (a *App) loadEmailsFresh(mailboxID string) tea.Cmd {
+	return func() tea.Msg {
+		emails, err := a.client.GetEmails(mailboxID, a.cfg.PageSize)
+
+		// Update the cache with fresh data
+		if err == nil && a.store != nil && len(emails) > 0 {
+			a.store.SaveEmails(a.client.AccountID(), emails)
+		}
+
+		return emailsLoadedMsg{emails: emails, fromCache: false, err: err}
+	}
+}
+
 func (a *App) loadEmail(emailID string) tea.Cmd {
 	return func() tea.Msg {
 		// Try cache first (for full body)
@@ -426,9 +440,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			a.err = msg.err
 		}
-		// Refresh emails after action
+		// Force refresh from network after action (skip cache)
 		if len(a.mailboxes) > 0 && a.selectedMailbox < len(a.mailboxes) {
-			return a, a.loadEmails(a.mailboxes[a.selectedMailbox].ID)
+			return a, a.loadEmailsFresh(a.mailboxes[a.selectedMailbox].ID)
 		}
 		return a, nil
 
@@ -671,6 +685,12 @@ func (a *App) handleMessagesKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if len(thread.Emails) > 0 {
 				return a.startCompose(&thread.Emails[0], views.ModeForward)
 			}
+		}
+	case key.Matches(msg, a.keys.Refresh):
+		// Force refresh from network
+		if len(a.mailboxes) > 0 && a.selectedMailbox < len(a.mailboxes) {
+			a.loading = true
+			return a, a.loadEmailsFresh(a.mailboxes[a.selectedMailbox].ID)
 		}
 	}
 	return a, nil
