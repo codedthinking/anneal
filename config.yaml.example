@@ -1,0 +1,27 @@
+# TuiMail Configuration
+# Copy to ~/.config/tuimail/config.yaml
+
+# Email accounts (tokens stored securely in system keyring)
+accounts:
+  - name: Work
+    email: work@fastmail.com
+    default: true
+
+  - name: Personal
+    email: personal@fastmail.com
+
+# Theme: dark, light
+theme: dark
+
+# External editor for composing emails
+# Uses $EDITOR environment variable by default
+editor: ""
+
+# Show preview pane in email list
+preview_pane: true
+
+# Group emails by conversation thread
+threading: true
+
+# Number of emails to load per page
+page_size: 50
