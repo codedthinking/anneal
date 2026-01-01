@@ -206,8 +206,12 @@ func (v *ComposeView) SetReply(email *models.Email, replyAll bool) {
 	// Quote original message
 	v.body.SetValue(v.quoteText(email.TextBody, email.From))
 
-	// Focus body for typing
-	v.focusField(FieldBody)
+	// Focus From if multiple identities, otherwise body for typing
+	if len(v.identities) > 1 {
+		v.focusField(FieldFrom)
+	} else {
+		v.focusField(FieldBody)
+	}
 }
 
 // SetForward configures the view for forwarding
@@ -244,8 +248,12 @@ func (v *ComposeView) SetForward(email *models.Email) {
 
 	v.body.SetValue(forwarded)
 
-	// Focus To field since it's empty
-	v.focusField(FieldTo)
+	// Focus From if multiple identities, otherwise To field since it's empty
+	if len(v.identities) > 1 {
+		v.focusField(FieldFrom)
+	} else {
+		v.focusField(FieldTo)
+	}
 }
 
 func (v *ComposeView) quoteText(body string, from []models.EmailAddress) string {
