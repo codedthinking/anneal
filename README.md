@@ -145,7 +145,7 @@ Use `Tab` to move between fields. `Ctrl+S` to send. `Esc` to cancel.
 | `f` | Forward |
 | `a` | Archive (whole thread) |
 | `d` | Delete |
-| `u` | Toggle read/unread |
+| `u` | Toggle read, or undelete in Trash |
 | `?` | Show all keybindings |
 | `Q` | Quit |
 

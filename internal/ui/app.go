@@ -622,6 +622,14 @@ func (a *App) handleMessagesKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if len(a.threads) > 0 && a.selectedThread < len(a.threads) {
 			thread := a.threads[a.selectedThread]
 			if len(thread.Emails) > 0 {
+				// In trash, "u" undeletes (moves to inbox)
+				if a.isInTrash() {
+					if a.selectedThread >= len(a.threads)-1 && a.selectedThread > 0 {
+						a.selectedThread--
+					}
+					return a, a.undeleteThread(thread.Emails)
+				}
+				// Otherwise toggle read/unread
 				return a, a.toggleUnread(thread.Emails[0])
 			}
 		}
@@ -930,6 +938,37 @@ func (a *App) archiveThread(emailIDs []string) tea.Cmd {
 	}
 }
 
+// isInTrash returns true if currently viewing the trash folder
+func (a *App) isInTrash() bool {
+	if a.selectedMailbox < len(a.mailboxes) {
+		return a.mailboxes[a.selectedMailbox].Role == "trash"
+	}
+	return false
+}
+
+// undeleteThread moves emails from trash back to inbox
+func (a *App) undeleteThread(emails []models.Email) tea.Cmd {
+	return func() tea.Msg {
+		var inboxID string
+		for _, mb := range a.mailboxes {
+			if mb.Role == "inbox" {
+				inboxID = mb.ID
+				break
+			}
+		}
+		if inboxID == "" {
+			return emailActionMsg{err: fmt.Errorf("inbox not found")}
+		}
+		// Move all emails in the thread to inbox
+		for _, email := range emails {
+			if err := a.client.MoveEmail(email.ID, "", inboxID); err != nil {
+				return emailActionMsg{err: err}
+			}
+		}
+		return emailActionMsg{err: nil}
+	}
+}
+
 func (a *App) openAttachment(att *models.Attachment) tea.Cmd {
 	return func() tea.Msg {
 		// Create cache directory
@@ -1065,11 +1104,17 @@ func (a *App) renderHelp() string {
 			{"↑/↓", "select"},
 			{"→/enter", "open"},
 			{"←/esc", "folders"},
-			{"c", "compose"},
-			{"r", "reply"},
-			{"a", "archive"},
-			{"?", "help"},
 		}
+		if a.isInTrash() {
+			keys = append(keys, struct{ key, desc string }{"u", "undelete"})
+		} else {
+			keys = append(keys,
+				struct{ key, desc string }{"c", "compose"},
+				struct{ key, desc string }{"r", "reply"},
+				struct{ key, desc string }{"a", "archive"},
+			)
+		}
+		keys = append(keys, struct{ key, desc string }{"?", "help"})
 	case ViewThread:
 		keys = []struct{ key, desc string }{
 			{"↑/↓", "select"},

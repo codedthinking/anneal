@@ -33,3 +33,4 @@ temp/
 config.yaml
 tuimail
 anneal
+*.cast
